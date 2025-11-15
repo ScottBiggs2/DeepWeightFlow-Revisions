@@ -50,10 +50,14 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+out_pca/
+out_pca
 
 # Translations
 *.mo
 *.pot
+*.npy
+
 
 # Django stuff:
 *.log

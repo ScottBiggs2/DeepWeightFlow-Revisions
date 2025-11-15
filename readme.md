@@ -56,23 +56,48 @@ python generateModelsCode/{file_name}.py
 │   ├── canonicalization.py
 │   ├── constants.json
 │   ├── flow_matching.py
-│   ├── gitrebasin.py
 │   ├── models.py
 │   ├── permutation_specs.py
 │   ├── train_and_generate.py
-│   ├── transfer_learning_Resnet18.py
+│   ├── transfer_learning_Resnet18.py [Not yet]
 │   └── utils.py
 ├── generateModelsCode
 │   ├── generate_fashion_mnist_weights.py
-│   ├── generate_iris_weights.py
+│   ├── generate_iris_weights.py [Not yet]
 │   ├── generate_mnist_weights.py
-│   ├── generateResnet18.py
+│   ├── generateResnet18.py [Not yet]
 │   ├── generateVitData.py
-│   └── getImageNetWeightsResnet20.py
+│   └── getImageNetWeightsResnet20.py [Not yet]
+├── BERT
+│   ├── 
 ├── LICENSE
 ├── README.md
 └── requirements.txt
 ```
+
+# BERT - demos and ideas for applying PCA compression to BERT and large transformer models: 
+
+`BERT/stream_pca_distilbert.py` - full gaussian streamed PCA by proxy (slow and bad): 
+
+```bash 
+python BERT/stream_pca_distilbert.py --model distilbert-base-uncased --k 64 --block_size 100000
+```
+
+Saves `out_pca/sketch_singular_values.npy` and `out_pca/W_full.memmap` 
+
+`BERT/stream_pca_srht_fast_torch.py` SRHT accelerarted streamed PCA with higher k/r ratio for improved fidelity: 
+
+Note: n_samples are SIMULATED by this script, they are NOT real. 
+```bash
+python BERT/stream_pca_srht_fast_torch.py \
+  --model distilbert-base-uncased \
+  --n_samples 4 \
+  --k 128 \
+  --r_factor 4 \
+  --block_size 200000 \
+  --out_dir out_pca
+```
+More notes in the `BERT/notes.md` including citations. 
 
 ## Usage
 
