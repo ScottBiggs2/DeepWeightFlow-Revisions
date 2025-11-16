@@ -262,8 +262,8 @@ def build_srht_sketch_from_samples_torch(sample_sources, seed, k, r_factor, bloc
         for name, bidx, block in iter_model_param_blocks(model_or_sd, block_size):
             x = block.astype(np.float32)
             
-            norm = np.linalg.norm(x) + 1e-12 # quickly normalize blocks to prevent scale issues
-            x = x / norm
+            # norm = np.linalg.norm(x) + 1e-12 # quickly normalize blocks to prevent scale issues
+            # x = x / norm
             rng = rng_for_block(seed, global_block_idx)
             z, signs, idx, m, n = srht_project_block_torch(x, rng, r, device)
             # accumulate
@@ -383,7 +383,7 @@ def compute_reconstruction_errors(sample_providers, W_full_path_or_array, meta, 
 # ----------------------------
 # demo noisy provider (simulate multiple checkpoints)
 # ----------------------------
-def make_noisy_provider_from_base(model_name_or_path, noise_scale=1e-3):
+def make_noisy_provider_from_base(model_name_or_path, noise_scale=1e-6):
     base_model = AutoModel.from_pretrained(model_name_or_path)
     sd = base_model.state_dict()
     sd_np = {k: v.detach().cpu().numpy().astype(np.float32) for k, v in sd.items()}
