@@ -49,19 +49,24 @@ from transformers import AutoModel
 # Device selection: prefer MPS (Apple Metal) on M1/M2, fallback to CPU
 # ----------------------------
 def get_torch_device():
+    if torch.cuda.is_available():
+        dev = torch.device("cuda")
+        print(f"Using device: CUDA ({torch.cuda.get_device_name(0)})")
+        return dev
+
+    # macOS MPS
     if hasattr(torch, "has_mps") and torch.has_mps:
         try:
             dev = torch.device("mps")
-            # quick sanity check
             _ = torch.tensor([1.0], device=dev)
-            print("Using device: MPS (Apple Metal)")
+            print(f"Using device: MPS (Apple Metal)")
             return dev
         except Exception:
             pass
+
     # fallback
-    dev = torch.device("cpu")
     print("Using device: CPU")
-    return dev
+    return torch.device("cpu")
 
 DEVICE = get_torch_device()
 
