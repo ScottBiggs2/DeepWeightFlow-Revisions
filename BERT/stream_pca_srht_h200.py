@@ -214,14 +214,32 @@ def build_srht_sketch(samples, seed, k, r_factor, block_size, device):
 # Eigen decomposition on GPU
 # ================================================================
 def eig_on_gpu(C_cpu: np.ndarray, k: int, device):
+    """
+    Move small symmetric C to GPU and compute top-k eigenvectors (largest).
+    Returns U_r (r x k) float32, s_r (k,) float32.
+    Robust to k > rank or k=0.
+    """
+    # move to GPU
     C_t = torch.from_numpy(C_cpu).to(device=device, dtype=torch.float64)
+
+    # eigendecompose (ascending)
     vals, vecs = torch.linalg.eigh(C_t)
+
+    # convert to float32
     vals = vals.to(torch.float32)
     vecs = vecs.to(torch.float32)
 
-    top_vals = vals[-k:][::-1].cpu().numpy()
-    top_vecs = vecs[:, -k:].cpu().numpy()[:, ::-1]
-    return top_vecs.astype(np.float32), top_vals.astype(np.float32)
+    # ensure k is valid
+    k = int(k)
+    k = max(1, min(k, vals.shape[0]))
+
+    # take largest k eigenvalues/eigenvectors
+    top_vals, idx = torch.topk(vals, k, largest=True, sorted=True)
+    top_vecs = vecs[:, idx]
+
+    # move back to CPU numpy
+    return top_vecs.cpu().numpy().astype(np.float32), top_vals.cpu().numpy().astype(np.float32)
+
 
 # ================================================================
 # Reconstruct full W
