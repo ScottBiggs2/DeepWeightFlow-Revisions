@@ -348,6 +348,6 @@ if __name__ == "__main__":
 
 # python BERT/distilbert_ipca_compress.py \
 #     --model distilbert-base-uncased \
-#     --components-per-matrix 128 \
+#     --components-per-matrix 256 \
 #     --row-batch 256 \
 #     --device cpu

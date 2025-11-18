@@ -1,9 +1,7 @@
 import torch
 import torch.nn as nn
 import logging
-import traceback
 from tqdm import tqdm
-import matplotlib.pyplot as plt
 from utils import Bunch
 
 class MultiClassFlowMatching:
@@ -15,8 +13,8 @@ class MultiClassFlowMatching:
         mode="velocity",
         t_dist="uniform",
         device=None,
-        # normalize_pred=False,
-        # geometric=False,
+        normalize_pred=False,
+        geometric=False,
     ):
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.sourceloader = sourceloader
@@ -25,16 +23,15 @@ class MultiClassFlowMatching:
         self.mode = mode
         self.t_dist = t_dist
         self.sigma = 0.001
-        # self.normalize_pred = normalize_pred
-        # self.geometric = geometric
+        self.normalize_pred = normalize_pred
+        self.geometric = geometric
 
         self.best_loss = float('inf')
         self.best_model_state = None
-
         self.input_dim = None
 
     def sample_from_loader(self, loader):
-        """Sample a batch from dataloader"""
+        """Sample a batch from dataloader, returns (data, labels)"""
         try:
             if not hasattr(loader, '_iterator') or loader._iterator is None:
                 loader._iterator = iter(loader)
@@ -43,20 +40,36 @@ class MultiClassFlowMatching:
             except StopIteration:
                 loader._iterator = iter(loader)
                 batch = next(loader._iterator)
-            return batch[0].to(self.device)
+            
+            # Handle both (data,) and (data, labels) returns
+            if isinstance(batch, (list, tuple)) and len(batch) >= 2:
+                return batch[0].to(self.device), batch[1].to(self.device)
+            else:
+                data = batch[0].to(self.device) if isinstance(batch, (list, tuple)) else batch.to(self.device)
+                return data, None
+                
         except Exception as e:
             logging.info(f"Error sampling from loader: {str(e)}")
             if hasattr(loader.dataset, '__getitem__'):
                 dummy = loader.dataset[0][0]
-                return torch.zeros(loader.batch_size, *dummy.shape, device=self.device)
-            return torch.zeros(loader.batch_size, 1, device=self.device)
+                return torch.zeros(loader.batch_size, *dummy.shape, device=self.device), None
+            return torch.zeros(loader.batch_size, 1, device=self.device), None
 
     def sample_time_and_flow(self):
-        """Sample time t and flow (for velocity or target mode)"""
-        x0 = self.sample_from_loader(self.sourceloader)
-        x1 = self.sample_from_loader(self.targetloader)
+        """Sample time t and flow with class conditioning"""
+        x0, _ = self.sample_from_loader(self.sourceloader)  # Source is just noise, no class
+        x1, c1 = self.sample_from_loader(self.targetloader)  # Target has class labels
+        
         batch_size = min(x0.size(0), x1.size(0))
         x0, x1 = x0[:batch_size], x1[:batch_size]
+        
+        # Handle class labels - ensure they're the right shape [batch_size, 1]
+        if c1 is not None:
+            c1 = c1[:batch_size]
+            if c1.dim() == 1:
+                c1 = c1.unsqueeze(-1)
+        else:
+            c1 = torch.zeros(batch_size, 1, device=self.device)
 
         if self.t_dist == "beta":
             alpha, beta_param = 2.0, 5.0
@@ -70,10 +83,12 @@ class MultiClassFlowMatching:
         xt = mu_t + epsilon
         ut = x1 - x0
 
-        return Bunch(t=t.unsqueeze(-1), x0=x0, xt=xt, x1=x1, ut=ut, eps=epsilon, batch_size=batch_size)
+        return Bunch(t=t.unsqueeze(-1), x0=x0, xt=xt, x1=x1, ut=ut, 
+                    eps=epsilon, batch_size=batch_size, c=c1)
 
     def forward(self, flow):
-        flow_pred = self.model(flow.xt, flow.t)
+        """Forward pass with class conditioning"""
+        flow_pred = self.model(flow.xt, flow.t, flow.c)
         return None, flow_pred
 
     def loss_fn(self, flow_pred, flow):
@@ -83,19 +98,14 @@ class MultiClassFlowMatching:
             l_flow = torch.mean((flow_pred.squeeze() - flow.ut) ** 2)
         return None, l_flow
 
-    def vector_field(self, xt, t):
-        """Compute vector field at point xt and time t"""
-        _, pred = self.forward(Bunch(xt=xt, t=t, batch_size=xt.size(0)))
+    def vector_field(self, xt, t, c):
+        """Compute vector field at point xt, time t, and class c"""
+        _, pred = self.forward(Bunch(xt=xt, t=t, c=c, batch_size=xt.size(0)))
         return pred if self.mode == "velocity" else pred - xt
 
     def train(self, n_iters=10, optimizer=None, scheduler=None, sigma=0.001, patience=1e99, 
-          log_freq=5, accum_steps=None):
-        """
-        Train the flow model with optional gradient accumulation.
-        
-        Args:
-            accum_steps: Number of steps to accumulate gradients. If None, no accumulation.
-        """
+              log_freq=5, accum_steps=None):
+        """Train the flow model with optional gradient accumulation"""
         self.sigma = sigma
         last_loss = 1e99
         patience_count = 0
@@ -116,11 +126,7 @@ class MultiClassFlowMatching:
                 logging.info(f"Skipping step {i} due to invalid loss: {loss.item()}")
                 continue
             
-            if use_grad_accum:
-                loss_scaled = loss / effective_accum_steps
-            else:
-                loss_scaled = loss
-            
+            loss_scaled = loss / effective_accum_steps if use_grad_accum else loss
             loss_scaled.backward()
             accum_count += 1
             accumulated_loss += loss.item()
@@ -149,31 +155,56 @@ class MultiClassFlowMatching:
                     patience_count = 0
                 
                 last_loss = avg_loss
-                
                 accum_count = 0
                 accumulated_loss = 0
             
             if i % log_freq == 0:
-                true_tensor = flow.ut if self.mode == "velocity" else flow.x1                
-                display_loss = loss.item()                
-                desc = f"Iters [loss {display_loss:.6f}"
+                desc = f"Iters [loss {loss.item():.6f}"
                 if use_grad_accum:
                     desc += f", accum {accum_count}/{effective_accum_steps}"
                 desc += "]"
                 pbar.set_description(desc)
-                    
         
         if use_grad_accum and accum_count > 0:
             optimizer.step()
             optimizer.zero_grad()
 
-    def map(self, x0, n_steps=50, return_traj=False, method="euler"):
+    def map(self, x0, class_label, n_steps=50, return_traj=False, method="euler"):
+        """
+        Map from source to target for a specific class.
+        
+        Supports class interpolation: non-integer class_label values will 
+        interpolate between classes (e.g., class_label=0.5 interpolates 
+        between class 0 and class 1).
+        
+        Args:
+            x0: Initial points [batch_size, dim]
+            class_label: Target class - can be:
+                - int: specific class (e.g., 0, 1, 2)
+                - float: interpolation between classes (e.g., 0.5, 1.3)
+                - tensor: per-sample class labels [batch_size, 1]
+            n_steps: Number of integration steps
+            return_traj: Whether to return full trajectory
+            method: Integration method ('euler' or 'rk4')
+        
+        Returns:
+            Generated weights at target class (or trajectory if return_traj=True)
+        """
         if self.best_model_state is not None:
             current_state = {k: v.clone() for k, v in self.model.state_dict().items()}
             self.model.load_state_dict(self.best_model_state)
 
         self.model.eval()
-        batch_size, flat_dim = x0.size()
+        batch_size = x0.size(0)
+        
+        # Handle class label - supports scalars, floats, and tensors
+        if isinstance(class_label, (int, float)):
+            c = torch.full((batch_size, 1), float(class_label), device=self.device, dtype=torch.float32)
+        else:
+            c = class_label.to(self.device).float()
+            if c.dim() == 1:
+                c = c.unsqueeze(-1)
+        
         traj = [x0.detach().clone()] if return_traj else None
         xt = x0.clone()
         times = torch.linspace(0, 1, n_steps, device=self.device)
@@ -182,22 +213,31 @@ class MultiClassFlowMatching:
         for i, t in enumerate(times[:-1]):
             with torch.no_grad():
                 t_tensor = torch.ones(batch_size, 1, device=self.device) * t
-                pred = self.model(xt, t_tensor)
-                if pred.dim() > 2: pred = pred.squeeze(-1)
+                pred = self.model(xt, t_tensor, c)
+                if pred.dim() > 2:
+                    pred = pred.squeeze(-1)
+                
                 vt = pred if self.mode == "velocity" else pred - xt
+                
                 if method == "euler":
                     xt = xt + vt * dt
                 elif method == "rk4":
                     k1 = vt
-                    k2 = self.model(xt + 0.5 * dt * k1, t_tensor + 0.5 * dt)
-                    if k2.dim() > 2: k2 = k2.squeeze(-1)
+                    k2 = self.model(xt + 0.5 * dt * k1, t_tensor + 0.5 * dt, c)
+                    if k2.dim() > 2:
+                        k2 = k2.squeeze(-1)
                     k2 = k2 if self.mode == "velocity" else k2 - (xt + 0.5 * dt * k1)
-                    k3 = self.model(xt + 0.5 * dt * k2, t_tensor + 0.5 * dt)
-                    if k3.dim() > 2: k3 = k3.squeeze(-1)
+                    
+                    k3 = self.model(xt + 0.5 * dt * k2, t_tensor + 0.5 * dt, c)
+                    if k3.dim() > 2:
+                        k3 = k3.squeeze(-1)
                     k3 = k3 if self.mode == "velocity" else k3 - (xt + 0.5 * dt * k2)
-                    k4 = self.model(xt + dt * k3, t_tensor + dt)
-                    if k4.dim() > 2: k4 = k4.squeeze(-1)
+                    
+                    k4 = self.model(xt + dt * k3, t_tensor + dt, c)
+                    if k4.dim() > 2:
+                        k4 = k4.squeeze(-1)
                     k4 = k4 if self.mode == "velocity" else k4 - (xt + dt * k3)
+                    
                     xt = xt + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
 
                 if return_traj:
@@ -208,13 +248,15 @@ class MultiClassFlowMatching:
         self.model.train()
         return traj if return_traj else xt
 
-    def generate_weights(self, n_samples=10, source_noise_std=0.001, **map_kwargs):
+    def generate_weights(self, n_samples=10, class_label=0, source_noise_std=0.001, **map_kwargs):
+        """Generate weights for a specific class"""
         assert self.input_dim is not None, "Set `self.input_dim` before generating weights."
         source_samples = torch.randn(n_samples, self.input_dim, device=self.device) * source_noise_std
-        return self.map(source_samples, **map_kwargs)
+        return self.map(source_samples, class_label=class_label, **map_kwargs)
+
 
 class MultiClassWeightSpaceFlowModel(nn.Module):
-    def __init__(self, input_dim, hidden_dim, dropout=0.1,time_embed_dim=64, class_embed_dim=64):
+    def __init__(self, input_dim, hidden_dim, dropout=0.1, time_embed_dim=64, class_embed_dim=64):
         super().__init__()
         self.input_dim = input_dim
         self.time_embed_dim = time_embed_dim
@@ -255,7 +297,14 @@ class MultiClassWeightSpaceFlowModel(nn.Module):
         nn.init.zeros_(self.net[-1].weight)
         nn.init.zeros_(self.net[-1].bias)
     
-    def forward(self, x, t):
+    def forward(self, x, t, c):
+        """
+        Args:
+            x: weight vectors [batch_size, input_dim]
+            t: time [batch_size, 1]
+            c: class labels [batch_size, 1]
+        """
         t_embed = self.time_embed(t)
-        combined = torch.cat([x, t_embed], dim=-1)
+        c_embed = self.class_embed(c)
+        combined = torch.cat([x, t_embed, c_embed], dim=-1)
         return self.net(combined)

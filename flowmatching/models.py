@@ -49,6 +49,45 @@ class MLP_MNIST(nn.Module):
         x = self.fc3(x)
         return x
 
+
+
+class MC_MLP_MNIST(nn.Module):
+    def __init__(self, init_type='xavier', seed=None):
+        super(MLP_MNIST, self).__init__()
+        self.fc1 = nn.Linear(784, 64)
+        self.fc2 = nn.Linear(64, 64)
+        self.fc3 = nn.Linear(64, 10)
+        
+        if seed is not None:
+            torch.manual_seed(seed)
+
+        self.init_weights(init_type)
+
+    def init_weights(self, init_type):
+        if init_type == 'xavier':
+            nn.init.xavier_uniform_(self.fc1.weight)
+            nn.init.xavier_uniform_(self.fc2.weight)
+            nn.init.xavier_uniform_(self.fc3.weight)
+        elif init_type == 'he':
+            nn.init.kaiming_uniform_(self.fc1.weight, nonlinearity='relu')
+            nn.init.kaiming_uniform_(self.fc2.weight, nonlinearity='relu')
+            nn.init.kaiming_uniform_(self.fc3.weight, nonlinearity='relu')
+        else:
+            nn.init.normal_(self.fc1.weight)
+            nn.init.normal_(self.fc2.weight)
+            nn.init.normal_(self.fc3.weight)
+        
+        nn.init.zeros_(self.fc1.bias)
+        nn.init.zeros_(self.fc2.bias)
+        nn.init.zeros_(self.fc3.bias)
+
+    def forward(self, x):
+        x = x.view(-1, 784)
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        x = self.fc3(x)
+        return x
+
 # --------------------------------------- MLP Fashion MNIST Definition ---------------------------------------
 
 class MLP_Fashion_MNIST(nn.Module):
@@ -57,6 +96,44 @@ class MLP_Fashion_MNIST(nn.Module):
         self.fc1 = nn.Linear(784, 128)
         self.fc2 = nn.Linear(128, 128)
         self.fc3 = nn.Linear(128, 10)
+        
+        if seed is not None:
+            torch.manual_seed(seed)
+
+        self.init_weights(init_type)
+
+    def init_weights(self, init_type):
+        if init_type == 'xavier':
+            nn.init.xavier_uniform_(self.fc1.weight)
+            nn.init.xavier_uniform_(self.fc2.weight)
+            nn.init.xavier_uniform_(self.fc3.weight)
+        elif init_type == 'he':
+            nn.init.kaiming_uniform_(self.fc1.weight, nonlinearity='relu')
+            nn.init.kaiming_uniform_(self.fc2.weight, nonlinearity='relu')
+            nn.init.kaiming_uniform_(self.fc3.weight, nonlinearity='relu')
+        else:
+            nn.init.normal_(self.fc1.weight)
+            nn.init.normal_(self.fc2.weight)
+            nn.init.normal_(self.fc3.weight)
+        
+        nn.init.zeros_(self.fc1.bias)
+        nn.init.zeros_(self.fc2.bias)
+        nn.init.zeros_(self.fc3.bias)
+
+    def forward(self, x):
+        x = x.view(-1, 784)
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        x = self.fc3(x)
+        return x
+
+
+class MC_MLP_Fashion_MNIST(nn.Module):
+    def __init__(self, init_type='xavier', seed=None):
+        super(MLP_Fashion_MNIST, self).__init__()
+        self.fc1 = nn.Linear(784, 64)
+        self.fc2 = nn.Linear(64, 64)
+        self.fc3 = nn.Linear(64, 10)
         
         if seed is not None:
             torch.manual_seed(seed)
