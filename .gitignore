@@ -3,7 +3,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.gz
-data/
+
+# Data and model artifacts
+/data/
+mc_mnist_models/
+mc_fashion_mnist_models/
+*_models/
 *.pt
 
 # C extensions
