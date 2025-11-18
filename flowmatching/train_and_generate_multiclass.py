@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader, TensorDataset, ConcatDataset
 from sklearn.decomposition import IncrementalPCA
 
 from utils import WeightSpaceObjectMLP, count_parameters
-from models import MLP_MNIST, MLP_Fashion_MNIST
+from models import MLP_MNIST, MLP_Fashion_MNIST,  MC_MLP_MNIST, MC_MLP_Fashion_MNIST
 from multiclass_flow_matching import MultiClassFlowMatching, MultiClassWeightSpaceFlowModel
 from canonicalization import get_permuted_models_data
 
@@ -23,8 +23,29 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def load_config(config_file='constants.json'):
-    with open(config_file, 'r') as f:
-        return json.load(f)
+    """Load config file, checking both current dir and script dir"""
+    # Try current working directory first
+    if os.path.exists(config_file):
+        with open(config_file, 'r') as f:
+            return json.load(f)
+    
+    # Try relative to script location
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, config_file)
+    if os.path.exists(config_path):
+        with open(config_path, 'r') as f:
+            return json.load(f)
+    
+    # If neither works, raise error with helpful message
+    raise FileNotFoundError(
+        f"Could not find '{config_file}' in:\n"
+        f"  - Current directory: {os.getcwd()}\n"
+        f"  - Script directory: {script_dir}\n"
+        f"Please either:\n"
+        f"  1. Run from the directory containing {config_file}\n"
+        f"  2. Use --config with full path\n"
+        f"  3. Place {config_file} in current directory"
+    )
 
 
 def generate_at_class_label(cfm, class_label, n_samples, actual_dim, source_std, 
@@ -86,11 +107,11 @@ def reconstruct_mlp_models(weights_flat, model_config, dataset):
             device=device
         )
         
-        # Create appropriate model type based on dataset
+        # Create appropriate model type based on dataset - for now
         if 'fashion' in dataset:
-            model = MLP_Fashion_MNIST()
+            model = MC_MLP_Fashion_MNIST()
         elif 'mnist' in dataset:
-            model = MLP_MNIST()
+            model = MC_MLP_MNIST()
         else:
             raise ValueError(f"Unknown dataset: {dataset}")
         
@@ -229,16 +250,35 @@ def train_and_generate(args):
             print(f"{'-'*60}")
             
             model_config = config['models'][model_name]
+            model_dir_raw = config['directories'][model_name]
             
-            # Determine directory based on dataset
-            dataset = model_config['dataset']
-            if dataset == 'mnist':
-                model_dir = config['directories']['mlp_mnist']
-            elif dataset == 'fashion_mnist':
-                model_dir = config['directories']['mlp_fashion_mnist']
+            # Resolve path relative to config file location or current directory
+            if not os.path.isabs(model_dir_raw):
+                # Try relative to current working directory first
+                model_dir = model_dir_raw
+                if not os.path.exists(model_dir):
+                    # Try relative to config file location
+                    config_dir = os.path.dirname(os.path.abspath(args.config))
+                    model_dir = os.path.join(config_dir, model_dir_raw)
+                    if not os.path.exists(model_dir):
+                        # Try relative to parent of config dir (for ../paths)
+                        parent_dir = os.path.dirname(config_dir)
+                        model_dir = os.path.normpath(os.path.join(parent_dir, model_dir_raw))
             else:
-                raise ValueError(f"Unknown dataset for multiclass: {dataset}")
+                model_dir = model_dir_raw
             
+            if not os.path.exists(model_dir):
+                raise FileNotFoundError(
+                    f"Could not find model directory: {model_dir_raw}\n"
+                    f"For model: {model_name}\n"
+                    f"Tried:\n"
+                    f"  - {model_dir_raw} (from cwd: {os.getcwd()})\n"
+                    f"  - {os.path.join(os.path.dirname(args.config), model_dir_raw)}\n"
+                    f"  - {model_dir}\n"
+                    f"Please check the 'directories' section in {args.config}"
+                )
+            
+            print(f"Using model directory: {model_dir}")
             pretrained_model_name = model_config.get('pretrained_model_name', 'mlp_seed')
             
             # Get permuted/original models
@@ -270,7 +310,7 @@ def train_and_generate(args):
                 'actual_dim': actual_dim,
                 'model_config': model_config,
                 'training_mode': training_mode,
-                'dataset': dataset
+                'dataset': model_config['dataset']  # Get dataset from model_config
             })
         
         # Verify all classes have same dimensionality
@@ -589,7 +629,7 @@ def main():
     parser.add_argument('--config', type=str, default='constants.json',
                        help='Configuration file path')
     parser.add_argument('--num_models', type=int, default=100,
-                       help='Number of pretrained models to use per class')
+                       help='Number of pretrained models to use PER CLASS (not total)')
     parser.add_argument('--ref_point', type=int, default=0,
                        help='Reference model index for canonicalization')
     parser.add_argument('--hidden_dim', type=int, default=None,
@@ -609,6 +649,7 @@ def main():
     print("="*80)
     print(f"Config file: {args.config}")
     print(f"Models per class: {args.num_models}")
+    print(f"Total models: {args.num_models * 2} (2 classes)")
     print(f"Reference point: {args.ref_point}")
     print(f"Architecture: mc_mlp_mnist (class 0) + mc_mlp_fashion_mnist (class 1)")
     print(f"Layer layout: [784, 64, 64, 10]")

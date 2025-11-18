@@ -53,7 +53,7 @@ class MLP_MNIST(nn.Module):
 
 class MC_MLP_MNIST(nn.Module):
     def __init__(self, init_type='xavier', seed=None):
-        super(MLP_MNIST, self).__init__()
+        super(MC_MLP_MNIST, self).__init__()
         self.fc1 = nn.Linear(784, 64)
         self.fc2 = nn.Linear(64, 64)
         self.fc3 = nn.Linear(64, 10)
@@ -130,7 +130,7 @@ class MLP_Fashion_MNIST(nn.Module):
 
 class MC_MLP_Fashion_MNIST(nn.Module):
     def __init__(self, init_type='xavier', seed=None):
-        super(MLP_Fashion_MNIST, self).__init__()
+        super(MC_MLP_Fashion_MNIST, self).__init__()
         self.fc1 = nn.Linear(784, 64)
         self.fc2 = nn.Linear(64, 64)
         self.fc3 = nn.Linear(64, 10)
