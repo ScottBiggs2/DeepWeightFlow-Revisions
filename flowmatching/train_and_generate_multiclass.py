@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader, TensorDataset, ConcatDataset
 from sklearn.decomposition import IncrementalPCA
 
 from utils import WeightSpaceObjectMLP, count_parameters
-from models import MLP_MNIST, MLP_Fashion_MNIST,  MC_MLP_MNIST, MC_MLP_Fashion_MNIST
+from models import MC_MLP_MNIST, MC_MLP_Fashion_MNIST, MLP_Iris
 from multiclass_flow_matching import MultiClassFlowMatching, MultiClassWeightSpaceFlowModel
 from canonicalization import get_permuted_models_data
 
@@ -107,11 +107,13 @@ def reconstruct_mlp_models(weights_flat, model_config, dataset):
             device=device
         )
         
-        # Create appropriate model type based on dataset - for now
+        # Create appropriate model type based on dataset
         if 'fashion' in dataset:
             model = MC_MLP_Fashion_MNIST()
         elif 'mnist' in dataset:
             model = MC_MLP_MNIST()
+        elif "iris" in dataset: 
+            model = MLP_Iris()
         else:
             raise ValueError(f"Unknown dataset: {dataset}")
         
@@ -220,12 +222,19 @@ def train_and_generate(args):
     # ========================================================================
     # Each tuple is (model_name_in_config, class_label)
     # Class labels should be consecutive integers starting from 0
+    
+    # For basic 2-class demo (MNIST + Fashion-MNIST, no PCA):
     model_classes = [
         ('mc_mlp_mnist', 0),
         ('mc_mlp_fashion_mnist', 1),
-        # ('mc_mlp_cifar10', 2),  # Example: add more classes here
-        # ('mc_mlp_custom', 3),
     ]
+    
+    # For 3-class PCA compression demo (uncomment to use):
+    # model_classes = [
+    #     ('mc_mlp_mnist_compressed', 0),
+    #     ('mc_mlp_fashion_mnist_compressed', 1),
+    #     ('mc_mlp_iris', 2),
+    # ]
     # ========================================================================
     
     print(f"Training multiclass flow matching for {len(model_classes)} classes")
@@ -310,7 +319,11 @@ def train_and_generate(args):
                 'actual_dim': actual_dim,
                 'model_config': model_config,
                 'training_mode': training_mode,
-                'dataset': model_config['dataset']  # Get dataset from model_config
+                'dataset': model_config['dataset'],
+                'model_dir': model_dir,  # Add this!
+                'pretrained_model_name': pretrained_model_name,  # Add this!
+                'org_models': org_models,  # Store the actual loaded models
+                'permuted_models': permuted_models  # Store the actual loaded models
             })
         
         # Verify all classes have same dimensionality
@@ -359,10 +372,14 @@ def train_and_generate(args):
             source_std = reference_config['source_std']
             total_samples = sum(d['target_tensor'].shape[0] for d in mode_class_data)
             source_tensor = torch.randn(total_samples, actual_dim) * source_std
-            source_dataset = TensorDataset(source_tensor)
+            
+            # Create a proper dataset with dummy labels (will be ignored)
+            source_labels = torch.zeros(total_samples, 1)
+            source_dataset = TensorDataset(source_tensor, source_labels)
             
             print(f"Source distribution: N(0, {source_std}²)")
             print(f"Total training samples: {total_samples:,}")
+            print(f"Source tensor shape: {source_tensor.shape}")
             
             # Create dataloaders
             def collate_fn(batch):
@@ -469,8 +486,8 @@ def train_and_generate(args):
             # Generate and evaluate models for each class
             n_samples = reference_config['n_samples']
             
-            # Also test interpolation between classes
-            test_interpolation = len(mode_class_data) == 2  # Only for 2 classes for now
+            # Store results for final summary
+            evaluation_results = []
             
             for class_data in mode_class_data:
                 class_label = class_data['class_label']
@@ -494,17 +511,24 @@ def train_and_generate(args):
                     new_weights_flat, model_config, dataset
                 )
                 
-                # Evaluate
-                from utils import print_stats
+                # Evaluate and compare
                 test_loader = get_data_loader(dataset, batch_size=32, train=False)
                 
-                mean_acc, std_acc = print_stats(generated_models, test_loader, device)
+                # Get the original models that were actually loaded during training
+                original_models = class_data['permuted_models'] if training_mode == "with_gitrebasin" else class_data['org_models']
+                original_models_subset = original_models[:n_samples]
                 
-                print(f"\n{'='*80}")
-                print(f"RESULTS - Class {class_label} ({model_name})")
-                print(f"Mode: {training_mode}, Hidden dim: {hidden_dim}")
-                print(f"Mean accuracy: {mean_acc:.4f} ± {std_acc:.4f}")
-                print(f"{'='*80}")
+                eval_stats = evaluate_and_compare_simple(
+                    generated_models,
+                    original_models_subset,
+                    test_loader,
+                    device,
+                    class_label,
+                    model_name
+                )
+                eval_stats['class_label'] = class_label
+                eval_stats['model_name'] = model_name
+                evaluation_results.append(eval_stats)
                 
                 # Save generated models if requested
                 if args.save_models:
@@ -519,24 +543,41 @@ def train_and_generate(args):
                         model_path = os.path.join(save_dir, f'generated_model_{idx}.pt')
                         torch.save(model.state_dict(), model_path)
                     
-                    # Save summary stats
+                    # Save summary stats with comparison
                     stats_path = os.path.join(save_dir, 'generation_stats.json')
                     with open(stats_path, 'w') as f:
                         json.dump({
                             'class_label': int(class_label),
                             'model_name': model_name,
                             'n_samples': n_samples,
-                            'mean_accuracy': float(mean_acc),
-                            'std_accuracy': float(std_acc),
+                            'original_mean_accuracy': float(eval_stats['original_mean']),
+                            'original_std_accuracy': float(eval_stats['original_std']),
+                            'generated_mean_accuracy': float(eval_stats['generated_mean']),
+                            'generated_std_accuracy': float(eval_stats['generated_std']),
+                            'accuracy_difference': float(eval_stats['difference']),
+                            'relative_diff_pct': float(eval_stats['relative_diff_pct']),
                             'training_mode': training_mode,
                             'hidden_dim': hidden_dim,
                             'integration_steps': reference_config['integration_steps'],
-                            'integration_method': reference_config['integration_method']
+                            'integration_method': reference_config['integration_method'],
+                            'used_pca': ipca is not None,
+                            'pca_components': actual_dim if ipca is not None else None
                         }, f, indent=2)
                     
                     print(f"✓ Saved {n_samples} generated models to {save_dir}")
                 
                 del generated_models
+            
+            # Print final summary
+            print(f"\n{'='*80}")
+            print(f"FINAL SUMMARY - {training_mode}, hidden_dim={hidden_dim}")
+            print(f"{'='*80}")
+            for result in evaluation_results:
+                print(f"\nClass {result['class_label']} ({result['model_name']}):")
+                print(f"  Original:  {result['original_mean']:.4f} ± {result['original_std']:.4f}")
+                print(f"  Generated: {result['generated_mean']:.4f} ± {result['generated_std']:.4f}")
+                print(f"  Δ Accuracy: {result['difference']:.4f} ({result['relative_diff_pct']:.2f}%)")
+            print(f"{'='*80}")
             
             # Test class interpolation - works for N classes
             if args.save_models and len(mode_class_data) >= 2:
@@ -609,15 +650,138 @@ def train_and_generate(args):
             torch.cuda.empty_cache()
 
 
+def evaluate_and_compare_simple(generated_models, original_models, test_loader, device, class_label, model_name):
+    """
+    Evaluate and compare generated vs original models.
+    
+    Args:
+        generated_models: List of generated models
+        original_models: List of original models (already loaded)
+        test_loader: DataLoader for evaluation
+        device: Device to run on
+        class_label: Class label for this set
+        model_name: Name of the model type
+    
+    Returns:
+        dict: Statistics for both generated and original models
+    """
+    from utils import print_stats
+    
+    print(f"\n{'='*80}")
+    print(f"EVALUATION - Class {class_label} ({model_name})")
+    print(f"{'='*80}")
+    
+    # Evaluate original models
+    print(f"\n[Original Models - {len(original_models)} models]")
+    orig_mean, orig_std = print_stats(original_models, test_loader, device)
+    
+    # Evaluate generated models
+    print(f"\n[Generated Models - {len(generated_models)} models]")
+    gen_mean, gen_std = print_stats(generated_models, test_loader, device)
+    
+    # Comparison
+    print(f"\n{'─'*80}")
+    print("COMPARISON:")
+    print(f"{'─'*80}")
+    print(f"Original: {orig_mean:.4f} ± {orig_std:.4f}")
+    print(f"Generated: {gen_mean:.4f} ± {gen_std:.4f}")
+    print(f"Difference: {abs(gen_mean - orig_mean):.4f} ({'+' if gen_mean > orig_mean else '-'}{abs((gen_mean - orig_mean)/orig_mean * 100):.2f}%)")
+    print(f"{'─'*80}")
+    
+    return {
+        'original_mean': orig_mean,
+        'original_std': orig_std,
+        'generated_mean': gen_mean,
+        'generated_std': gen_std,
+        'difference': abs(gen_mean - orig_mean),
+        'relative_diff_pct': abs((gen_mean - orig_mean)/orig_mean * 100)
+    }
+
+
+def evaluate_and_compare(generated_models, original_model_dir, pretrained_model_name, model_config, 
+                        test_loader, device, class_label, model_name, num_models, training_mode):
+    """
+    Evaluate and compare generated vs original models.
+    
+    Args:
+        generated_models: List of generated models
+        original_model_dir: Directory containing original pretrained models
+        pretrained_model_name: Prefix for model files (e.g., 'mlp_seed')
+        model_config: Config dict for this model type
+        test_loader: DataLoader for evaluation
+        device: Device to run on
+        class_label: Class label for this set
+        model_name: Name of the model type
+        num_models: Number of original models to load
+        training_mode: 'with_gitrebasin' or 'without_rebasin'
+    
+    Returns:
+        dict: Statistics for both generated and original models
+    """
+    from utils import print_stats
+    import torch
+    
+    print(f"\n{'='*80}")
+    print(f"EVALUATION - Class {class_label} ({model_name})")
+    print(f"{'='*80}")
+    
+    # Load original models from disk
+    print(f"\n[Loading Original Models from {original_model_dir}]")
+    
+    # Get the original models using get_permuted_models_data
+    from canonicalization import get_permuted_models_data
+    _, org_models, permuted_models = get_permuted_models_data(
+        model_name=model_name,
+        model_dir=original_model_dir,
+        pretrained_model_name=pretrained_model_name,
+        num_models=num_models,
+        ref_point=0,
+        device=device,
+        model_config=model_config
+    )
+    
+    # Choose which set based on training mode
+    original_models = permuted_models if training_mode == "with_gitrebasin" else org_models
+    original_models_subset = original_models[:len(generated_models)]
+    
+    # Evaluate original models
+    print("\n[Original Models]")
+    orig_mean, orig_std = print_stats(original_models_subset, test_loader, device)
+    
+    # Evaluate generated models
+    print("\n[Generated Models]")
+    gen_mean, gen_std = print_stats(generated_models, test_loader, device)
+    
+    # Comparison
+    print(f"\n{'─'*80}")
+    print("COMPARISON:")
+    print(f"{'─'*80}")
+    print(f"Original: {orig_mean:.4f} ± {orig_std:.4f}")
+    print(f"Generated: {gen_mean:.4f} ± {gen_std:.4f}")
+    print(f"Difference: {abs(gen_mean - orig_mean):.4f} ({'+' if gen_mean > orig_mean else '-'}{abs((gen_mean - orig_mean)/orig_mean * 100):.2f}%)")
+    print(f"{'─'*80}")
+    
+    return {
+        'original_mean': orig_mean,
+        'original_std': orig_std,
+        'generated_mean': gen_mean,
+        'generated_std': gen_std,
+        'difference': abs(gen_mean - orig_mean),
+        'relative_diff_pct': abs((gen_mean - orig_mean)/orig_mean * 100)
+    }
+
+
 def get_data_loader(dataset_name, batch_size=32, train=False):
     """Helper to get data loader"""
-    from utils import load_mnist, load_fashion_mnist
+    from utils import load_mnist, load_fashion_mnist, load_iris_dataset
     
     dataset_name = dataset_name.lower()
     if dataset_name == "mnist":
         return load_mnist(batch_size=batch_size)
     elif dataset_name == "fashion_mnist":
         return load_fashion_mnist(batch_size=batch_size)
+    elif dataset_name == "iris":
+        return load_iris_dataset(batch_size=batch_size)
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}")
 

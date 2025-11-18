@@ -381,7 +381,7 @@ def _process_mlp_iris(model_name, model_dir, num_models, ref_seed, device, model
     init_types = model_config.get('mlp_init_types', ["default", "he", "xavier", "uniform", "normal"]) \
         if model_config else ["default", "he", "xavier", "uniform", "normal"]
 
-    ref_init = "xavier"
+    ref_init = "default"
     ref_name = f"mlp_{ref_init}_seed{ref_seed}"
     ref_model, ps = get_model_and_spec(model_name, device)
     ref_model_path = f"{model_dir}/{ref_name}.pt"

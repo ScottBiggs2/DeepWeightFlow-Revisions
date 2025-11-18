@@ -60,6 +60,9 @@ class MultiClassFlowMatching:
         x0, _ = self.sample_from_loader(self.sourceloader)  # Source is just noise, no class
         x1, c1 = self.sample_from_loader(self.targetloader)  # Target has class labels
         
+        # DEBUG: Print shapes
+        # print(f"DEBUG: x0.shape = {x0.shape}, x1.shape = {x1.shape}")
+        
         batch_size = min(x0.size(0), x1.size(0))
         x0, x1 = x0[:batch_size], x1[:batch_size]
         
@@ -78,6 +81,10 @@ class MultiClassFlowMatching:
             t = torch.rand(batch_size, device=self.device)
 
         t_pad = t.view(-1, *([1] * (x0.dim() - 1)))
+        
+        # DEBUG: Print shapes before operation
+        # print(f"DEBUG: After slicing - x0.shape = {x0.shape}, x1.shape = {x1.shape}, t_pad.shape = {t_pad.shape}")
+        
         mu_t = (1 - t_pad) * x0 + t_pad * x1
         epsilon = torch.randn_like(x0) * self.sigma
         xt = mu_t + epsilon
