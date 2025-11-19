@@ -191,7 +191,7 @@
       "architecture": "mlp",
       "layer_layout": [784, 64, 64, 10],
       "batch_size": 2,
-      "flow_hidden_dims": [64, 128],
+      "flow_hidden_dims": [64],
       "time_embed_dim": 32,
       "class_embed_dim": 32,
       "dropout": 0.1,
@@ -205,7 +205,7 @@
       "integration_steps": 100,
       "integration_method": "rk4",
       "use_pca": true,
-      "pca_components": 131,
+      "pca_components": 8,
       "pretrained_model_name": "mlp_seed",
       "training_modes": ["with_gitrebasin"]
     },
@@ -228,7 +228,7 @@
       "integration_steps": 100,
       "integration_method": "rk4",
       "use_pca": true,
-      "pca_components": 131,
+      "pca_components": 8,
       "pretrained_model_name": "mlp_seed",
       "training_modes": ["with_gitrebasin"]
     },
@@ -254,6 +254,29 @@
       "pca_components": null,
       "pretrained_model_name": "mlp_xavier_seed",
       "training_modes": ["with_gitrebasin"]
+    }, 
+    "mc_mlp_iris_compressed": {
+      "dataset": "iris",
+      "architecture": "mlp",
+      "layer_layout": [4, 16, 3],
+      "batch_size": 2,
+      "flow_hidden_dims": [64],
+      "time_embed_dim": 32,
+      "class_embed_dim": 32,
+      "dropout": 0.1,
+      "n_iters": 5000,
+      "lr": 5e-4,
+      "weight_decay": 1e-5,
+      "sigma": 0.001,
+      "patience": 100,
+      "source_std": 0.01,
+      "n_samples": 50,
+      "integration_steps": 100,
+      "integration_method": "rk4",
+      "use_pca": true,
+      "pca_components": 8,
+      "pretrained_model_name": "mlp_xavier_seed",
+      "training_modes": ["with_gitrebasin"]
     }
   },
   "directories": {
@@ -265,6 +288,7 @@
     "mc_mlp_mnist_compressed": "mc_mnist_models",
     "mc_mlp_fashion_mnist_compressed": "mc_fashion_mnist_models",
     "mc_mlp_iris": "iris_models",
+    "mc_mlp_iris_compressed": "iris_models",
     "resnet20_cifar10": "../generateModelsCode/imagenet_resnet_models",
     "resnet18_cifar10": "../generateModelsCode/cifar10_models",
     "vit_cifar10": "../generateModelsCode/cifar10_vit_small_patch4_models"

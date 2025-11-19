@@ -15,7 +15,7 @@ from sklearn.preprocessing import StandardScaler
 
 from utils import WeightSpaceObjectMLP, WeightSpaceObjectResnet, VisionTransformerWeightSpace
 from utils import *
-from models import MLP_MNIST, MLP_Fashion_MNIST, MLP_Iris, ResNet20, get_resnet18, create_vit_small
+from models import MC_MLP_MNIST, MLP_MNIST, MLP_Fashion_MNIST, MLP_Iris, ResNet20, get_resnet18, create_vit_small
 from flow_matching import FlowMatching, WeightSpaceFlowModel
 from canonicalization import get_permuted_models_data
 
@@ -148,6 +148,10 @@ def train_and_generate(args):
                 target_tensor = flat_target_weights
                 actual_dim = flat_dim
 
+            print(f"  DEBUG: flat_latent.shape = {flat_latent.shape}")
+            print(f"  DEBUG: target_tensor.shape = {target_tensor.shape}")
+            print(f"  DEBUG: actual_dim = {actual_dim}")
+
             source_std = model_config['source_std']
             source_tensor = torch.randn_like(target_tensor) * source_std
 
@@ -207,10 +211,12 @@ def train_and_generate(args):
                         layers=np.array(model_config['layer_layout']),
                         device=device
                     )
-                    if 'fashion' in args.model:
+                    if 'fashion' and not 'mc' in args.model:
                         model = MLP_Fashion_MNIST()
-                    elif 'mnist' in args.model:
+                    elif 'mnist' and not 'mc' in args.model:
                         model = MLP_MNIST()
+                    elif 'mnist' and 'mc' in args.model:
+                        model = MC_MLP_MNIST()
                     elif 'iris' in args.model:
                         model = MLP_Iris()
                     else:
@@ -292,7 +298,7 @@ def train_and_generate(args):
 def main():
     parser = argparse.ArgumentParser(description='Train flow matching for neural network weight generation')
     parser.add_argument('--model', type=str, required=True,
-                        choices=['mlp_fashion_mnist', 'mlp_mnist', 'mlp_iris', 'resnet20_cifar10', 'resnet18_cifar10', 'vit_cifar10'],
+                        choices=['mlp_fashion_mnist', 'mlp_mnist', 'mlp_iris', 'resnet20_cifar10', 'resnet18_cifar10', 'vit_cifar10', 'mc_mlp_mnist_compressed'],
                         help='Model to train')
     parser.add_argument('--config', type=str, default='constants.json', help='Configuration file path')
     parser.add_argument('--num_models', type=int, default=100, help='Number of pretrained models to use')

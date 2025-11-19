@@ -190,6 +190,11 @@ def prepare_class_data(models, model_config, class_label):
     else:
         target_tensor = flat_target_weights
         actual_dim = flat_dim
+
+    
+    print(f"  DEBUG: flat_latent.shape = {flat_latent.shape}")
+    print(f"  DEBUG: target_tensor.shape = {target_tensor.shape}")
+    print(f"  DEBUG: actual_dim = {actual_dim}")
     
     # Create labels
     labels = torch.full([target_tensor.shape[0], 1], class_label, dtype=torch.float32)
@@ -224,11 +229,17 @@ def train_and_generate(args):
     # Class labels should be consecutive integers starting from 0
     
     # For basic 2-class demo (MNIST + Fashion-MNIST, no PCA):
+    # model_classes = [
+    #     ('mc_mlp_mnist', 0),
+    #     ('mc_mlp_fashion_mnist', 1),
+    # ]
+
     model_classes = [
-        ('mc_mlp_mnist', 0),
-        ('mc_mlp_fashion_mnist', 1),
+        ('mc_mlp_mnist_compressed', 0),
+        ('mc_mlp_fashion_mnist_compressed', 1),
+        ('mc_mlp_iris_compressed', 2),
     ]
-    
+
     # For 3-class PCA compression demo (uncomment to use):
     # model_classes = [
     #     ('mc_mlp_mnist_compressed', 0),
@@ -790,7 +801,7 @@ def main():
     parser = argparse.ArgumentParser(
         description='Train multiclass flow matching for neural network weight generation'
     )
-    parser.add_argument('--config', type=str, default='constants.json',
+    parser.add_argument('--config', type=str, default='flowmatching/constants.json',
                        help='Configuration file path')
     parser.add_argument('--num_models', type=int, default=100,
                        help='Number of pretrained models to use PER CLASS (not total)')
@@ -839,3 +850,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+    # python flowmatching/train_and_generate_multiclass.py --hidden_dim 64 --num_models 10
