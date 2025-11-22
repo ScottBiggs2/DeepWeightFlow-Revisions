@@ -89,5 +89,5 @@ if __name__ == "__main__":
     # inits = ["xavier", "he", "normal", "uniform", "default"]
     inits = ["default"]
     for init_type in inits:
-        for seed in range(10):
+        for seed in range(100):
             train_model(init_type, seed, train_loader, test_loader)

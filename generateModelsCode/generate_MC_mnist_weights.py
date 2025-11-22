@@ -87,5 +87,5 @@ def train_model(seed, train_loader, test_loader, epochs=3, lr=0.001, save_dir="m
 if __name__ == "__main__":
     train_loader, test_loader = get_mnist_loaders()
 
-    for seed in range(10): 
+    for seed in range(100): 
         train_model(seed, train_loader, test_loader)

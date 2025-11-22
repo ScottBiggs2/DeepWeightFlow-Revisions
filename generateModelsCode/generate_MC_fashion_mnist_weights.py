@@ -120,5 +120,5 @@ def train_model(seed, train_loader, test_loader, epochs=5, lr=1e-3, save_dir="mc
 if __name__ == "__main__":
     train_loader, test_loader = get_fashion_mnist_loaders(batch_size=128)
 
-    for seed in range(10):
+    for seed in range(100):
         train_model(seed, train_loader, test_loader)
