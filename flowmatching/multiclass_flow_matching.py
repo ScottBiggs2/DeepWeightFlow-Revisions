@@ -302,23 +302,35 @@ class MultiClassWeightSpaceFlowModel(nn.Module):
 
         # 3) Main MLP: input dim = flat_dim + t_embed_dim + class_embed_dim
         self.block_1 = ResidualBlock( input_dim + time_embed_dim + class_embed_dim, hidden_dim, dropout = dropout)
-        self.block_2 = ResidualBlock( input_dim + time_embed_dim + class_embed_dim, hidden_dim, dropout = dropout)
-        self.block_3 = ResidualBlock( input_dim + time_embed_dim + class_embed_dim, hidden_dim//2, dropout = dropout)
+        self.block_2 = ResidualBlock( hidden_dim + time_embed_dim + class_embed_dim, hidden_dim, dropout = dropout)
+        self.block_3 = ResidualBlock( hidden_dim + time_embed_dim + class_embed_dim, hidden_dim//2, dropout = dropout)
         self.block_4 = ResidualBlock( hidden_dim//2, hidden_dim, dropout = 0)
         self.output_layer = nn.Linear(hidden_dim, input_dim)
 
     def forward(self, x, t, c): 
         t_embed = self.time_embed(t)
         c_embed = self.class_embed(c) 
+        # print(f"Input shape: {x.shape}, t_embed shape: {t_embed.shape}, c_embed shape: {c_embed.shape}")
+
         # idea, add slight jitter to class embedding to smooth grads? I think Saumya tried this and said it didn't help
         combined_input = torch.cat([x, t_embed, c_embed], dim=-1)
         h1 = self.block_1(combined_input)
+        # print(f"Block 1 output shape: {h1.shape}")
+
         h1_combined = torch.cat([h1, t_embed, c_embed], dim=-1)
         h2 = self.block_2(h1_combined)
+        # print(f"Block 2 output shape: {h1.shape}")
+
         h2_combined = torch.cat([h2, t_embed, c_embed], dim=-1)
         h3 = self.block_3(h2_combined)
+        # print(f"Block 3 output shape: {h1.shape}")
+
         h4 = self.block_4(h3)
+        # print(f"Block 4 output shape: {h1.shape}")
+
         output = self.output_layer(h4)
+        # print(f"Output shape: {h1.shape}")
+
         return output
 
 # class MultiClassWeightSpaceFlowModel(nn.Module):

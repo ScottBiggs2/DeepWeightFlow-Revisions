@@ -15,6 +15,9 @@ class MultiClassFlowMatching:
         device=None,
         normalize_pred=False,
         geometric=False,
+        cfg_dropout_prob=0.1,  # NEW: Probability of dropping class conditioning
+        label_noise_std=0.05,  # NEW: Std dev of label noise for smoothing
+        unconditional_token=-1.0,  # NEW: Token to indicate unconditional generation
     ):
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.sourceloader = sourceloader
@@ -25,6 +28,11 @@ class MultiClassFlowMatching:
         self.sigma = 0.001
         self.normalize_pred = normalize_pred
         self.geometric = geometric
+        
+        # CFG and label smoothing parameters
+        self.cfg_dropout_prob = cfg_dropout_prob
+        self.label_noise_std = label_noise_std
+        self.unconditional_token = unconditional_token
 
         self.best_loss = float('inf')
         self.best_model_state = None
@@ -56,12 +64,9 @@ class MultiClassFlowMatching:
             return torch.zeros(loader.batch_size, 1, device=self.device), None
 
     def sample_time_and_flow(self):
-        """Sample time t and flow with class conditioning"""
+        """Sample time t and flow with class conditioning + CFG + label noise"""
         x0, _ = self.sample_from_loader(self.sourceloader)  # Source is just noise, no class
         x1, c1 = self.sample_from_loader(self.targetloader)  # Target has class labels
-        
-        # DEBUG: Print shapes
-        # print(f"DEBUG: x0.shape = {x0.shape}, x1.shape = {x1.shape}")
         
         batch_size = min(x0.size(0), x1.size(0))
         x0, x1 = x0[:batch_size], x1[:batch_size]
@@ -73,6 +78,24 @@ class MultiClassFlowMatching:
                 c1 = c1.unsqueeze(-1)
         else:
             c1 = torch.zeros(batch_size, 1, device=self.device)
+        
+        # ========================================================================
+        # LABEL NOISE: Add slight noise to class labels for smoother interpolation
+        # ========================================================================
+        if self.label_noise_std > 0 and self.training:
+            noise = torch.randn_like(c1) * self.label_noise_std
+            c1 = c1 + noise
+        
+        # ========================================================================
+        # CLASSIFIER-FREE GUIDANCE: Randomly drop class conditioning during training
+        # ========================================================================
+        if self.cfg_dropout_prob > 0 and self.training:
+            # Create mask for which samples should be unconditional
+            dropout_mask = torch.rand(batch_size, 1, device=self.device) < self.cfg_dropout_prob
+            # Replace masked labels with unconditional token
+            c1 = torch.where(dropout_mask, 
+                           torch.full_like(c1, self.unconditional_token), 
+                           c1)
 
         if self.t_dist == "beta":
             alpha, beta_param = 2.0, 5.0
@@ -81,9 +104,6 @@ class MultiClassFlowMatching:
             t = torch.rand(batch_size, device=self.device)
 
         t_pad = t.view(-1, *([1] * (x0.dim() - 1)))
-        
-        # DEBUG: Print shapes before operation
-        # print(f"DEBUG: After slicing - x0.shape = {x0.shape}, x1.shape = {x1.shape}, t_pad.shape = {t_pad.shape}")
         
         mu_t = (1 - t_pad) * x0 + t_pad * x1
         epsilon = torch.randn_like(x0) * self.sigma
@@ -114,6 +134,7 @@ class MultiClassFlowMatching:
               log_freq=5, accum_steps=None):
         """Train the flow model with optional gradient accumulation"""
         self.sigma = sigma
+        self.training = True  # NEW: Flag for training mode
         last_loss = 1e99
         patience_count = 0
         pbar = tqdm(range(n_iters), desc="Training steps")
@@ -175,8 +196,11 @@ class MultiClassFlowMatching:
         if use_grad_accum and accum_count > 0:
             optimizer.step()
             optimizer.zero_grad()
+        
+        self.training = False  # NEW: Reset training flag
 
-    def map(self, x0, class_label, n_steps=50, return_traj=False, method="euler"):
+    def map(self, x0, class_label, n_steps=50, return_traj=False, method="euler", 
+            guidance_scale=1.0):  # NEW: CFG guidance scale
         """
         Map from source to target for a specific class.
         
@@ -193,6 +217,7 @@ class MultiClassFlowMatching:
             n_steps: Number of integration steps
             return_traj: Whether to return full trajectory
             method: Integration method ('euler' or 'rk4')
+            guidance_scale: CFG strength (1.0 = no guidance, 2.0-3.0 = strong guidance)
         
         Returns:
             Generated weights at target class (or trajectory if return_traj=True)
@@ -202,6 +227,7 @@ class MultiClassFlowMatching:
             self.model.load_state_dict(self.best_model_state)
 
         self.model.eval()
+        self.training = False  # Ensure training flag is off
         batch_size = x0.size(0)
         
         # Handle class label - supports scalars, floats, and tensors
@@ -212,6 +238,15 @@ class MultiClassFlowMatching:
             if c.dim() == 1:
                 c = c.unsqueeze(-1)
         
+        # ========================================================================
+        # CFG: Prepare unconditional labels if guidance is enabled
+        # ========================================================================
+        use_cfg = guidance_scale != 1.0 and self.cfg_dropout_prob > 0
+        if use_cfg:
+            c_uncond = torch.full_like(c, self.unconditional_token)
+        else:
+            c_uncond = None
+        
         traj = [x0.detach().clone()] if return_traj else None
         xt = x0.clone()
         times = torch.linspace(0, 1, n_steps, device=self.device)
@@ -220,30 +255,87 @@ class MultiClassFlowMatching:
         for i, t in enumerate(times[:-1]):
             with torch.no_grad():
                 t_tensor = torch.ones(batch_size, 1, device=self.device) * t
-                pred = self.model(xt, t_tensor, c)
-                if pred.dim() > 2:
-                    pred = pred.squeeze(-1)
+                
+                # ================================================================
+                # CFG: Compute both conditional and unconditional predictions
+                # ================================================================
+                if use_cfg:
+                    # Conditional prediction
+                    pred_cond = self.model(xt, t_tensor, c)
+                    if pred_cond.dim() > 2:
+                        pred_cond = pred_cond.squeeze(-1)
+                    
+                    # Unconditional prediction
+                    pred_uncond = self.model(xt, t_tensor, c_uncond)
+                    if pred_uncond.dim() > 2:
+                        pred_uncond = pred_uncond.squeeze(-1)
+                    
+                    # CFG formula: pred = pred_uncond + guidance_scale * (pred_cond - pred_uncond)
+                    pred = pred_uncond + guidance_scale * (pred_cond - pred_uncond)
+                else:
+                    # Standard prediction without CFG
+                    pred = self.model(xt, t_tensor, c)
+                    if pred.dim() > 2:
+                        pred = pred.squeeze(-1)
                 
                 vt = pred if self.mode == "velocity" else pred - xt
                 
                 if method == "euler":
                     xt = xt + vt * dt
                 elif method == "rk4":
+                    # Note: For RK4 with CFG, we need to recompute at each sub-step
+                    # This is more expensive but more accurate
                     k1 = vt
-                    k2 = self.model(xt + 0.5 * dt * k1, t_tensor + 0.5 * dt, c)
-                    if k2.dim() > 2:
-                        k2 = k2.squeeze(-1)
-                    k2 = k2 if self.mode == "velocity" else k2 - (xt + 0.5 * dt * k1)
                     
-                    k3 = self.model(xt + 0.5 * dt * k2, t_tensor + 0.5 * dt, c)
-                    if k3.dim() > 2:
-                        k3 = k3.squeeze(-1)
-                    k3 = k3 if self.mode == "velocity" else k3 - (xt + 0.5 * dt * k2)
+                    # k2 computation
+                    xt_k2 = xt + 0.5 * dt * k1
+                    t_k2 = t_tensor + 0.5 * dt
+                    if use_cfg:
+                        pred_k2_cond = self.model(xt_k2, t_k2, c)
+                        if pred_k2_cond.dim() > 2:
+                            pred_k2_cond = pred_k2_cond.squeeze(-1)
+                        pred_k2_uncond = self.model(xt_k2, t_k2, c_uncond)
+                        if pred_k2_uncond.dim() > 2:
+                            pred_k2_uncond = pred_k2_uncond.squeeze(-1)
+                        k2 = pred_k2_uncond + guidance_scale * (pred_k2_cond - pred_k2_uncond)
+                    else:
+                        k2 = self.model(xt_k2, t_k2, c)
+                        if k2.dim() > 2:
+                            k2 = k2.squeeze(-1)
+                    k2 = k2 if self.mode == "velocity" else k2 - xt_k2
                     
-                    k4 = self.model(xt + dt * k3, t_tensor + dt, c)
-                    if k4.dim() > 2:
-                        k4 = k4.squeeze(-1)
-                    k4 = k4 if self.mode == "velocity" else k4 - (xt + dt * k3)
+                    # k3 computation
+                    xt_k3 = xt + 0.5 * dt * k2
+                    if use_cfg:
+                        pred_k3_cond = self.model(xt_k3, t_k2, c)
+                        if pred_k3_cond.dim() > 2:
+                            pred_k3_cond = pred_k3_cond.squeeze(-1)
+                        pred_k3_uncond = self.model(xt_k3, t_k2, c_uncond)
+                        if pred_k3_uncond.dim() > 2:
+                            pred_k3_uncond = pred_k3_uncond.squeeze(-1)
+                        k3 = pred_k3_uncond + guidance_scale * (pred_k3_cond - pred_k3_uncond)
+                    else:
+                        k3 = self.model(xt_k3, t_k2, c)
+                        if k3.dim() > 2:
+                            k3 = k3.squeeze(-1)
+                    k3 = k3 if self.mode == "velocity" else k3 - xt_k3
+                    
+                    # k4 computation
+                    xt_k4 = xt + dt * k3
+                    t_k4 = t_tensor + dt
+                    if use_cfg:
+                        pred_k4_cond = self.model(xt_k4, t_k4, c)
+                        if pred_k4_cond.dim() > 2:
+                            pred_k4_cond = pred_k4_cond.squeeze(-1)
+                        pred_k4_uncond = self.model(xt_k4, t_k4, c_uncond)
+                        if pred_k4_uncond.dim() > 2:
+                            pred_k4_uncond = pred_k4_uncond.squeeze(-1)
+                        k4 = pred_k4_uncond + guidance_scale * (pred_k4_cond - pred_k4_uncond)
+                    else:
+                        k4 = self.model(xt_k4, t_k4, c)
+                        if k4.dim() > 2:
+                            k4 = k4.squeeze(-1)
+                    k4 = k4 if self.mode == "velocity" else k4 - xt_k4
                     
                     xt = xt + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
 
@@ -263,35 +355,44 @@ class MultiClassFlowMatching:
 
 
 class ResidualBlock(nn.Module):
-    def __init__(self, in_dim, out_dim):
+    def __init__(self, in_dim, out_dim, dropout=0.1):
         super().__init__()
         self.linear = nn.Linear(in_dim, out_dim)
         self.norm = nn.LayerNorm(out_dim)
         self.activation = nn.GELU()
+        self.dropout = nn.Dropout(dropout)
         self.residual = (in_dim == out_dim)
 
     def forward(self, x):
-        out = self.norm( self.activation(self.linear(x)) )
+        out = self.norm(self.activation(self.linear(x)))
         if self.residual:
             return out + x
-        return out
+        return self.dropout(out)
 
 
-class TimeConditionedMLP(nn.Module):
+class MultiClassWeightSpaceFlowModel(nn.Module):
     """
-    A more flexible framework where I can add hidden conditioning
+    Enhanced multiclass flow model with larger embeddings for better class separation
     """
-    def __init__(self, input_dim, hidden_dim, dropout = 0.1, time_embed_dim = 64, class_embed_dim = 64):
+    def __init__(self, input_dim, hidden_dim, dropout=0.1, time_embed_dim=64, class_embed_dim=128):  # Larger default!
         super().__init__()
         self.input_dim = input_dim
         self.time_embed_dim = time_embed_dim
         self.class_embed_dim = class_embed_dim 
         self.hidden_dims = [hidden_dim]
         
-        self.class_embed = nn.Seuqential(
+        # ========================================================================
+        # ENHANCED CLASS EMBEDDING: Deeper and more expressive for better separation
+        # ========================================================================
+        self.class_embed = nn.Sequential(
             nn.Linear(1, class_embed_dim),
+            nn.LayerNorm(class_embed_dim),  # Add normalization
             nn.GELU(),
-            nn.Linear(class_embed_dim, class_embed_dim)
+            nn.Dropout(dropout * 0.5),  # Light dropout
+            nn.Linear(class_embed_dim, class_embed_dim),
+            nn.LayerNorm(class_embed_dim),
+            nn.GELU(),
+            nn.Linear(class_embed_dim, class_embed_dim)  # Third layer for more capacity
         )
 
         self.time_embed = nn.Sequential( 
@@ -300,84 +401,31 @@ class TimeConditionedMLP(nn.Module):
             nn.Linear(time_embed_dim, time_embed_dim)
         ) 
 
-        # 3) Main MLP: input dim = flat_dim + t_embed_dim + class_embed_dim
-        self.block_1 = ResidualBlock(input_dim + time_embed_dim + class_embed_dim, hidden_dim)
-        self.block_2 = ResidualBlock(hidden_dim + time_embed_dim + class_embed_dim, hidden_dim//2)
-        self.block_3 = ResidualBlock(hidden_dim//2 + time_embed_dim + class_embed_dim, hidden_dim)
+        # Main MLP blocks with conditioning re-injection
+        self.block_1 = ResidualBlock(input_dim + time_embed_dim + class_embed_dim, hidden_dim, dropout=dropout)
+        self.block_2 = ResidualBlock(hidden_dim + time_embed_dim + class_embed_dim, hidden_dim, dropout=dropout)
+        self.block_3 = ResidualBlock(hidden_dim + time_embed_dim + class_embed_dim, hidden_dim//2, dropout=dropout)
+        self.block_4 = ResidualBlock(hidden_dim//2, hidden_dim, dropout=0)
         self.output_layer = nn.Linear(hidden_dim, input_dim)
+        
+        # Initialize output layer to near-zero for stability
+        nn.init.zeros_(self.output_layer.weight)
+        nn.init.zeros_(self.output_layer.bias)
 
     def forward(self, x, t, c): 
         t_embed = self.time_embed(t)
-        c_embed = self.class_embed(c) 
-        # idea, add slight jitter to class embedding to smooth grads? I think Saumya tried this and said it didn't help
-        combined_input = torch.cat([input.x, t_embed, c_embed], dim=-1)
+        c_embed = self.class_embed(c)
+
+        combined_input = torch.cat([x, t_embed, c_embed], dim=-1)
         h1 = self.block_1(combined_input)
+
         h1_combined = torch.cat([h1, t_embed, c_embed], dim=-1)
         h2 = self.block_2(h1_combined)
+
         h2_combined = torch.cat([h2, t_embed, c_embed], dim=-1)
         h3 = self.block_3(h2_combined)
-        output = self.output_layer(h3)
+
+        h4 = self.block_4(h3)
+        output = self.output_layer(h4)
 
         return output
-
-
-class BetterMultiClassWeightSpaceFlowModel(nn.Module):
-    """
-    Ideas for changes to improve multi-class and cross-architecture performance: 
-    * Extra hidden layer 
-    * Extra time/class embedding injection within hidden stack
-    * Return to residual blocks 
-    * More data/training (related, larger class/time dims?)
-    """
-    def __init__(self, input_dim, hidden_dim, dropout=0.1, time_embed_dim=64, class_embed_dim=64):
-        super().__init__()
-        self.input_dim = input_dim
-        self.time_embed_dim = time_embed_dim
-        self.class_embed_dim = class_embed_dim
-
-        self.class_embed = nn.Sequential(
-            nn.Linear(1, class_embed_dim), 
-            nn.GELU(),
-            nn.Linear(class_embed_dim, class_embed_dim)
-        )
-        
-        self.time_embed = nn.Sequential(
-            nn.Linear(1, time_embed_dim),
-            nn.GELU(),
-            nn.Linear(time_embed_dim, time_embed_dim)
-        )
-        
-        # logging.info(f"hidden_dim:{hidden_dim}")
-        
-        self.net = nn.Sequential(
-            nn.Linear(input_dim + time_embed_dim + class_embed_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            
-            nn.Linear(hidden_dim, hidden_dim//2),
-            nn.LayerNorm(hidden_dim//2), 
-            nn.GELU(),
-            nn.Dropout(dropout),
-
-            nn.Linear(hidden_dim//2, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.GELU(),
-            
-            nn.Linear(hidden_dim, input_dim)
-        )
-        
-        nn.init.zeros_(self.net[-1].weight)
-        nn.init.zeros_(self.net[-1].bias)
-    
-    def forward(self, x, t, c):
-        """
-        Args:
-            x: weight vectors [batch_size, input_dim]
-            t: time [batch_size, 1]
-            c: class labels [batch_size, 1]
-        """
-        t_embed = self.time_embed(t)
-        c_embed = self.class_embed(c)
-        combined = torch.cat([x, t_embed, c_embed], dim=-1)
-        return self.net(combined)
