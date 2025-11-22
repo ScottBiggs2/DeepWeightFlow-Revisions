@@ -4,6 +4,8 @@ __pycache__/
 *$py.class
 *.gz
 *.csv
+*.png 
+
 
 # Data and model artifacts
 /data/

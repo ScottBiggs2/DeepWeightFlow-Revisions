@@ -39,6 +39,18 @@ def iris_mlp_permutation_spec_mlp() -> PermutationSpec:
         "fc2.bias": (None,),
     })
 
+# --------------------------------------- MLP California Spec ---------------------------------------
+def california_mlp_permutation_spec_mlp() -> PermutationSpec:
+    """Permutation spec for 3-layer MLP (no .T, natural weight shapes)"""
+    return permutation_spec_from_axes_to_perm({
+        "fc1.weight": ("P_0", None), 
+        "fc1.bias": ("P_0",),
+        "fc2.weight": ("P_1", "P_0"), 
+        "fc2.bias": ("P_1",),
+        "fc3.weight": (None, "P_1"),
+        "fc3.bias": (None,),
+    })
+
 # --------------------------------------- MLP MNIST Spec ---------------------------------------
 def mnist_mlp_permutation_spec_mlp() -> PermutationSpec:
     """Permutation spec for 3-layer MNIST MLP (no .T, natural weight shapes)"""
@@ -362,6 +374,11 @@ def get_model_and_spec(model_name: str, device):
         from permutation_specs import iris_mlp_permutation_spec_mlp
         model = MLP_Iris()
         ps = iris_mlp_permutation_spec_mlp()
+    elif 'california' in model_name:
+        from models import MLP_California
+        from permutation_specs import california_mlp_permutation_spec_mlp
+        model = MLP_California()
+        ps = california_mlp_permutation_spec_mlp()
     elif "resnet20" in model_name:
         from models import ResNet20
         from permutation_specs import resnet20_permutation_spec

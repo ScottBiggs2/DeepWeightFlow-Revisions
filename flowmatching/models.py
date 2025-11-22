@@ -87,7 +87,7 @@ class MC_MLP_MNIST(nn.Module):
         x = torch.relu(self.fc2(x))
         x = self.fc3(x)
         return x
-
+    
 # --------------------------------------- MLP Fashion MNIST Definition ---------------------------------------
 
 class MLP_Fashion_MNIST(nn.Module):
@@ -176,7 +176,21 @@ class MLP_Iris(nn.Module):
 
     def forward(self, x):
         return self.fc2(self.relu(self.fc1(x)))
+    
 
+# --------------------------------------- MLP California Definition ---------------------------------------
+class MLP_California(nn.Module):
+    def __init__(self, input_size=8, init_type='he', seed=None):
+        super(MLP_California, self).__init__()
+        self.fc1 = nn.Linear(input_size, 64)
+        self.fc2 = nn.Linear(64, 64)
+        self.fc3 = nn.Linear(64, 1)  # Regression: single output
+    
+    def forward(self, x):
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        x = self.fc3(x)
+        return x
 # --------------------------------------- Resnet18 Definition ---------------------------------------
 
 def get_resnet18(num_classes=10):

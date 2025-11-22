@@ -948,7 +948,7 @@ class FlowMatching:
 
 
 class WeightSpaceFlowModel(nn.Module):
-    def __init__(self, input_dim, time_embed_dim=64, dropout=0.2):
+    def __init__(self, input_dim, time_embed_dim=64, dropout=0.1):
         super().__init__()
         self.input_dim = input_dim
         self.time_embed_dim = time_embed_dim
@@ -1240,7 +1240,7 @@ def main():
             )
             
             cfm.train(
-                n_iters=3000,
+                n_iters=30000,
                 optimizer=optimizer,
                 scheduler=scheduler,
                 sigma=0.001,

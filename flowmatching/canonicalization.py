@@ -6,7 +6,7 @@ from tqdm import tqdm
 from typing import Dict, Any, List, Tuple, Optional
 from scipy.optimize import linear_sum_assignment
 from permutation_specs import *
-from models import MC_MLP_Fashion_MNIST, MC_MLP_MNIST, MLP_MNIST, MLP_Fashion_MNIST, MLP_Iris, ResNet20, get_resnet18, create_vit_small
+from models import MLP_California, MC_MLP_Fashion_MNIST, MC_MLP_MNIST, MLP_MNIST, MLP_Fashion_MNIST, MLP_Iris, ResNet20, get_resnet18, create_vit_small
 from utils import VisionTransformerWeightSpace
 
 def get_permuted_param(ps, perm, wk, params_b, except_axis=None):
@@ -315,6 +315,8 @@ def get_model_and_spec(model_name: str, device=None):
         return MC_MLP_Fashion_MNIST().to(device), fashion_mnist_mlp_permutation_spec()
     elif "mlp_iris" in model_name:
         return MLP_Iris().to(device), iris_mlp_permutation_spec_mlp()
+    elif "mlp_california" in model_name:
+        return MLP_California().to(device), california_mlp_permutation_spec_mlp()
     elif "resnet20" in model_name:
         return ResNet20().to(device), resnet20_permutation_spec()
     elif "resnet18" in model_name:

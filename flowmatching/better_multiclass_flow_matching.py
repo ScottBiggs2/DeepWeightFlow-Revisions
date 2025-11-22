@@ -261,23 +261,23 @@ class MultiClassFlowMatching:
         source_samples = torch.randn(n_samples, self.input_dim, device=self.device) * source_noise_std
         return self.map(source_samples, class_label=class_label, **map_kwargs)
 
+
 class ResidualBlock(nn.Module):
-    def __init__(self, in_dim, out_dim, dropout=0.1):
+    def __init__(self, in_dim, out_dim):
         super().__init__()
         self.linear = nn.Linear(in_dim, out_dim)
         self.norm = nn.LayerNorm(out_dim)
         self.activation = nn.GELU()
-        self.dropout = nn.Dropout(dropout)
         self.residual = (in_dim == out_dim)
 
     def forward(self, x):
         out = self.norm( self.activation(self.linear(x)) )
         if self.residual:
             return out + x
-        return self.dropout(out)
+        return out
 
 
-class MultiClassWeightSpaceFlowModel(nn.Module):
+class TimeConditionedMLP(nn.Module):
     """
     A more flexible framework where I can add hidden conditioning
     """
@@ -288,7 +288,7 @@ class MultiClassWeightSpaceFlowModel(nn.Module):
         self.class_embed_dim = class_embed_dim 
         self.hidden_dims = [hidden_dim]
         
-        self.class_embed = nn.Sequential(
+        self.class_embed = nn.Seuqential(
             nn.Linear(1, class_embed_dim),
             nn.GELU(),
             nn.Linear(class_embed_dim, class_embed_dim)
@@ -301,16 +301,16 @@ class MultiClassWeightSpaceFlowModel(nn.Module):
         ) 
 
         # 3) Main MLP: input dim = flat_dim + t_embed_dim + class_embed_dim
-        self.block_1 = ResidualBlock(input_dim + time_embed_dim + class_embed_dim, hidden_dim, dropout = dropout)
-        self.block_2 = ResidualBlock(hidden_dim + time_embed_dim + class_embed_dim, hidden_dim//2, dropout = dropout)
-        self.block_3 = ResidualBlock(hidden_dim//2 + time_embed_dim + class_embed_dim, hidden_dim, dropout = 0)
+        self.block_1 = ResidualBlock(input_dim + time_embed_dim + class_embed_dim, hidden_dim)
+        self.block_2 = ResidualBlock(hidden_dim + time_embed_dim + class_embed_dim, hidden_dim//2)
+        self.block_3 = ResidualBlock(hidden_dim//2 + time_embed_dim + class_embed_dim, hidden_dim)
         self.output_layer = nn.Linear(hidden_dim, input_dim)
 
     def forward(self, x, t, c): 
         t_embed = self.time_embed(t)
         c_embed = self.class_embed(c) 
         # idea, add slight jitter to class embedding to smooth grads? I think Saumya tried this and said it didn't help
-        combined_input = torch.cat([x, t_embed, c_embed], dim=-1)
+        combined_input = torch.cat([input.x, t_embed, c_embed], dim=-1)
         h1 = self.block_1(combined_input)
         h1_combined = torch.cat([h1, t_embed, c_embed], dim=-1)
         h2 = self.block_2(h1_combined)
@@ -320,54 +320,64 @@ class MultiClassWeightSpaceFlowModel(nn.Module):
 
         return output
 
-# class MultiClassWeightSpaceFlowModel(nn.Module):
-#     def __init__(self, input_dim, hidden_dim, dropout=0.1, time_embed_dim=64, class_embed_dim=64):
-#         super().__init__()
-#         self.input_dim = input_dim
-#         self.time_embed_dim = time_embed_dim
-#         self.class_embed_dim = class_embed_dim
 
-#         self.class_embed = nn.Sequential(
-#             nn.Linear(1, class_embed_dim), 
-#             nn.GELU(),
-#             nn.Linear(class_embed_dim, class_embed_dim)
-#         )
+class BetterMultiClassWeightSpaceFlowModel(nn.Module):
+    """
+    Ideas for changes to improve multi-class and cross-architecture performance: 
+    * Extra hidden layer 
+    * Extra time/class embedding injection within hidden stack
+    * Return to residual blocks 
+    * More data/training (related, larger class/time dims?)
+    """
+    def __init__(self, input_dim, hidden_dim, dropout=0.1, time_embed_dim=64, class_embed_dim=64):
+        super().__init__()
+        self.input_dim = input_dim
+        self.time_embed_dim = time_embed_dim
+        self.class_embed_dim = class_embed_dim
+
+        self.class_embed = nn.Sequential(
+            nn.Linear(1, class_embed_dim), 
+            nn.GELU(),
+            nn.Linear(class_embed_dim, class_embed_dim)
+        )
         
-#         self.time_embed = nn.Sequential(
-#             nn.Linear(1, time_embed_dim),
-#             nn.GELU(),
-#             nn.Linear(time_embed_dim, time_embed_dim)
-#         )
-                
-#         self.net = nn.Sequential(
-#             nn.Linear(input_dim + time_embed_dim + class_embed_dim, hidden_dim),
-#             nn.LayerNorm(hidden_dim),
-#             nn.GELU(),
-#             nn.Dropout(dropout),
-            
-#             nn.Linear(hidden_dim, hidden_dim//2),
-#             nn.LayerNorm(hidden_dim//2), 
-#             nn.GELU(),
-#             nn.Dropout(dropout),
-            
-#             nn.Linear(hidden_dim//2, hidden_dim),
-#             nn.LayerNorm(hidden_dim),
-#             nn.GELU(),
-            
-#             nn.Linear(hidden_dim, input_dim)
-#         )
+        self.time_embed = nn.Sequential(
+            nn.Linear(1, time_embed_dim),
+            nn.GELU(),
+            nn.Linear(time_embed_dim, time_embed_dim)
+        )
         
-#         nn.init.zeros_(self.net[-1].weight)
-#         nn.init.zeros_(self.net[-1].bias)
+        # logging.info(f"hidden_dim:{hidden_dim}")
+        
+        self.net = nn.Sequential(
+            nn.Linear(input_dim + time_embed_dim + class_embed_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            
+            nn.Linear(hidden_dim, hidden_dim//2),
+            nn.LayerNorm(hidden_dim//2), 
+            nn.GELU(),
+            nn.Dropout(dropout),
+
+            nn.Linear(hidden_dim//2, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.GELU(),
+            
+            nn.Linear(hidden_dim, input_dim)
+        )
+        
+        nn.init.zeros_(self.net[-1].weight)
+        nn.init.zeros_(self.net[-1].bias)
     
-#     def forward(self, x, t, c):
-#         """
-#         Args:
-#             x: weight vectors [batch_size, input_dim]
-#             t: time [batch_size, 1]
-#             c: class labels [batch_size, 1]
-#         """
-#         t_embed = self.time_embed(t)
-#         c_embed = self.class_embed(c)
-#         combined = torch.cat([x, t_embed, c_embed], dim=-1)
-#         return self.net(combined)
+    def forward(self, x, t, c):
+        """
+        Args:
+            x: weight vectors [batch_size, input_dim]
+            t: time [batch_size, 1]
+            c: class labels [batch_size, 1]
+        """
+        t_embed = self.time_embed(t)
+        c_embed = self.class_embed(c)
+        combined = torch.cat([x, t_embed, c_embed], dim=-1)
+        return self.net(combined)

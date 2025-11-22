@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import numpy as np
 from typing import Optional, List
 from torchvision import datasets, transforms
-from sklearn.datasets import load_iris
+from sklearn.datasets import load_iris, fetch_california_housing
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from models import AttentionWeights, TransformerBlockWeights
@@ -348,6 +348,31 @@ def load_fashion_mnist(batch_size=32):
     test_loader = torch.utils.data.DataLoader(test_data, batch_size=batch_size, shuffle=False)
     return test_loader
 
+def get_california_loaders(batch_size=64, test_size=0.2, random_state=None):
+    # Load dataset
+    california = fetch_california_housing()
+    X, y = california.data, california.target
+
+    # Split and scale
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=random_state)
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_test = scaler.transform(X_test)
+
+    # Convert to PyTorch tensors
+    X_train = torch.FloatTensor(X_train)
+    X_test = torch.FloatTensor(X_test)
+    y_train = torch.FloatTensor(y_train).view(-1, 1)
+    y_test = torch.FloatTensor(y_test).view(-1, 1)
+
+    # Create DataLoader
+    # train_ds = TensorDataset(X_train, y_train)
+    test_ds = TensorDataset(X_test, y_test)
+    # train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False)
+
+    return test_loader
+
 def load_iris_dataset(batch_size=32):
     iris = load_iris()
     X, y = iris.data, iris.target
@@ -494,6 +519,26 @@ def print_stats(models, test_loader, device):
     print(f"Max Accuracy: {max_acc:.2f}%")
     
     return mean, std
+
+def print_regression_stats(models, test_loader, device):
+    criterion = nn.MSELoss()  # Regression: MSE loss
+    for model in models: 
+        # Evaluate
+        model.eval()
+        preds, targets = [], []
+        with torch.no_grad():
+            for xb, yb in test_loader:
+                out = model(xb)
+                preds.append(out)
+                targets.append(yb)
+        preds = torch.cat(preds, dim=0)
+        targets = torch.cat(targets, dim=0)
+
+        # Calculate metrics
+        mse = nn.MSELoss()(preds, targets).item()
+        mae = nn.L1Loss()(preds, targets).item()
+        print(f"Model {model}: Test MSE={mse:.4f}, MAE={mae:.4f}")
+        return mse, mae
 
 def recalibrate_bn_stats(model, device='cuda', print_stats=False):
     """Recalculate BatchNorm statistics for generated weights"""

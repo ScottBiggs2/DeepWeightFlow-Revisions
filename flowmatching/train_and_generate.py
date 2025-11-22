@@ -15,7 +15,7 @@ from sklearn.preprocessing import StandardScaler
 
 from utils import WeightSpaceObjectMLP, WeightSpaceObjectResnet, VisionTransformerWeightSpace
 from utils import *
-from models import MC_MLP_MNIST, MLP_MNIST, MLP_Fashion_MNIST, MLP_Iris, ResNet20, get_resnet18, create_vit_small
+from models import MLP_California, MC_MLP_MNIST, MLP_MNIST, MLP_Fashion_MNIST, MLP_Iris, ResNet20, get_resnet18, create_vit_small
 from flow_matching import FlowMatching, WeightSpaceFlowModel
 from canonicalization import get_permuted_models_data
 
@@ -50,6 +50,8 @@ def get_data_loader(dataset_name: str, batch_size: int = 32, train: bool = False
     elif dataset_name == "iris":
         return load_iris_dataset(batch_size=batch_size)
     
+    elif dataset_name == "california":
+        return get_california_loaders(batch_size=batch_size)  
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}")
 
@@ -148,9 +150,9 @@ def train_and_generate(args):
                 target_tensor = flat_target_weights
                 actual_dim = flat_dim
 
-            print(f"  DEBUG: flat_latent.shape = {flat_latent.shape}")
-            print(f"  DEBUG: target_tensor.shape = {target_tensor.shape}")
-            print(f"  DEBUG: actual_dim = {actual_dim}")
+            # print(f"  DEBUG: flat_latent.shape = {flat_latent.shape}")
+            # print(f"  DEBUG: target_tensor.shape = {target_tensor.shape}")
+            # print(f"  DEBUG: actual_dim = {actual_dim}")
 
             source_std = model_config['source_std']
             source_tensor = torch.randn_like(target_tensor) * source_std
@@ -219,6 +221,8 @@ def train_and_generate(args):
                         model = MC_MLP_MNIST()
                     elif 'iris' in args.model:
                         model = MLP_Iris()
+                    elif 'california' in args.model:
+                        model = MLP_California()
                     else:
                         raise ValueError(f"Unknown MLP model: {args.model}")
             
@@ -288,17 +292,22 @@ def train_and_generate(args):
                     del new_model
             else:
                 print("Incorrect model type")
-                
-            mean_acc, std_acc = print_stats(generated_models, test_loader, device)
-            print(f"\nResults for {training_mode} with hidden_dim={hidden_dim}: mean={mean_acc:.4f}, std={std_acc:.4f}")
-
+            
+            if 'california' not in args.model:
+                mean_acc, std_acc = print_stats(generated_models, test_loader, device)
+                print(f"\nResults for {training_mode} with hidden_dim={hidden_dim}: mean={mean_acc:.4f}, std={std_acc:.4f}")
+            elif 'california' in args.model:
+                mse, mae = print_regression_stats(generated_models, test_loader, device)
+                print(f"\nResults for {training_mode} with hidden_dim={hidden_dim}: MSE={mse:.4f}, MAE={mae:.4f}")
+            else: 
+                print("Evaluation not implemented for this model type.")
             del flow_model, cfm, generated_models
             torch.cuda.empty_cache()
 
 def main():
     parser = argparse.ArgumentParser(description='Train flow matching for neural network weight generation')
     parser.add_argument('--model', type=str, required=True,
-                        choices=['mlp_fashion_mnist', 'mlp_mnist', 'mlp_iris', 'resnet20_cifar10', 'resnet18_cifar10', 'vit_cifar10', 'mc_mlp_mnist_compressed'],
+                        choices=['mlp_fashion_mnist', 'mlp_mnist', 'mlp_iris', 'resnet20_cifar10', 'mlp_california', 'resnet18_cifar10', 'vit_cifar10', 'mc_mlp_mnist_compressed'],
                         help='Model to train')
     parser.add_argument('--config', type=str, default='constants.json', help='Configuration file path')
     parser.add_argument('--num_models', type=int, default=100, help='Number of pretrained models to use')
