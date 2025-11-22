@@ -190,7 +190,7 @@
       "dataset": "mnist",
       "architecture": "mlp",
       "layer_layout": [784, 64, 64, 10],
-      "batch_size": 2,
+      "batch_size": 4,
       "flow_hidden_dims": [64, 128],
       "time_embed_dim": 64,
       "class_embed_dim": 64,
@@ -213,7 +213,7 @@
       "dataset": "fashion_mnist",
       "architecture": "mlp",
       "layer_layout": [784, 64, 64, 10],
-      "batch_size": 2,
+      "batch_size": 4,
       "flow_hidden_dims": [64, 128],
       "time_embed_dim": 64,
       "class_embed_dim": 64,
@@ -259,7 +259,7 @@
       "dataset": "iris",
       "architecture": "mlp",
       "layer_layout": [4, 16, 3],
-      "batch_size": 2,
+      "batch_size": 4,
       "flow_hidden_dims": [64, 128],
       "time_embed_dim": 64,
       "class_embed_dim": 64,
@@ -318,5 +318,6 @@
   },
   "training_modes": ["with_gitrebasin", "without_rebasin"],
   "t_dist": "uniform",
-  "mlp_init_types": ["default", "he", "xavier", "uniform", "normal"]
+  "mlp_init_types": ["default"],
+  "multiple_init_study_mlp_init_types": ["default", "he", "xavier", "uniform", "normal"]
 }
