@@ -301,10 +301,10 @@ class MultiClassWeightSpaceFlowModel(nn.Module):
         ) 
 
         # 3) Main MLP: input dim = flat_dim + t_embed_dim + class_embed_dim
-        self.block_1 = ResidualBlock( in_dim = (input_dim + time_embed_dim + class_embed_dim), hidden_dim = hidden_dim, dropout = dropout)
-        self.block_2 = ResidualBlock( in_dim = (input_dim + time_embed_dim + class_embed_dim), hidden_dim = hidden_dim, dropout = dropout)
-        self.block_3 = ResidualBlock( in_dim = (input_dim + time_embed_dim + class_embed_dim), hidden_dim = hidden_dim//2, dropout = dropout)
-        self.block_4 = ResidualBlock(in_dim = hidden_dim//2, hidden_dim = hidden_dim, dropout = 0)
+        self.block_1 = ResidualBlock( input_dim + time_embed_dim + class_embed_dim, hidden_dim, dropout = dropout)
+        self.block_2 = ResidualBlock( input_dim + time_embed_dim + class_embed_dim, hidden_dim, dropout = dropout)
+        self.block_3 = ResidualBlock( input_dim + time_embed_dim + class_embed_dim, hidden_dim//2, dropout = dropout)
+        self.block_4 = ResidualBlock( hidden_dim//2, hidden_dim, dropout = 0)
         self.output_layer = nn.Linear(hidden_dim, input_dim)
 
     def forward(self, x, t, c): 
