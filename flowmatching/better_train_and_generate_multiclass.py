@@ -184,7 +184,11 @@ def prepare_class_data(models, model_config, class_label):
     ipca = None
     if model_config.get('use_pca', False) and model_config.get('pca_components'):
         print(f"Applying PCA with {model_config['pca_components']} components")
-        ipca = IncrementalPCA(n_components=model_config['pca_components'], batch_size=10)
+        # ipca = IncrementalPCA(n_components=model_config['pca_components'], batch_size=10)
+
+        pca_batch_size = max(model_config['pca_components'] + 10, min(50, flat_target_weights.shape[0]))
+        ipca = IncrementalPCA(n_components=model_config['pca_components'], batch_size=pca_batch_size)
+        
         flat_latent = ipca.fit_transform(flat_target_weights.cpu().numpy())
         target_tensor = torch.tensor(flat_latent, dtype=torch.float32)
         actual_dim = model_config['pca_components']
