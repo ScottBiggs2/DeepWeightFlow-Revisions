@@ -302,8 +302,9 @@ class MultiClassWeightSpaceFlowModel(nn.Module):
 
         # 3) Main MLP: input dim = flat_dim + t_embed_dim + class_embed_dim
         self.block_1 = ResidualBlock(input_dim + time_embed_dim + class_embed_dim, hidden_dim, dropout = dropout)
-        self.block_2 = ResidualBlock(hidden_dim + time_embed_dim + class_embed_dim, hidden_dim//2, dropout = dropout)
-        self.block_3 = ResidualBlock(hidden_dim//2 + time_embed_dim + class_embed_dim, hidden_dim, dropout = 0)
+        self.block_2 = ResidualBlock(input_dim + time_embed_dim + class_embed_dim, hidden_dim, dropout = dropout)
+        self.block_3 = ResidualBlock(hidden_dim + time_embed_dim + class_embed_dim, hidden_dim//2, dropout = dropout)
+        self.block_4 = ResidualBlock(hidden_dim//2, hidden_dim, dropout = 0)
         self.output_layer = nn.Linear(hidden_dim, input_dim)
 
     def forward(self, x, t, c): 
@@ -316,8 +317,8 @@ class MultiClassWeightSpaceFlowModel(nn.Module):
         h2 = self.block_2(h1_combined)
         h2_combined = torch.cat([h2, t_embed, c_embed], dim=-1)
         h3 = self.block_3(h2_combined)
-        output = self.output_layer(h3)
-
+        h4 = self.block_4(h3)
+        output = self.output_layer(h4)
         return output
 
 # class MultiClassWeightSpaceFlowModel(nn.Module):
