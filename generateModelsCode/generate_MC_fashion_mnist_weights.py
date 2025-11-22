@@ -86,7 +86,7 @@ def evaluate(model, test_loader, device):
     return correct / total
 
 
-def train_model(seed, train_loader, test_loader, epochs=5, lr=1e-3, save_dir="mc_fashion_mnist_models"):
+def train_model(seed, train_loader, test_loader, epochs=25, lr=1e-3, save_dir="mc_fashion_mnist_models"):
     torch.manual_seed(seed)
     model = MLP(seed=seed).to(device)
     criterion = nn.CrossEntropyLoss()

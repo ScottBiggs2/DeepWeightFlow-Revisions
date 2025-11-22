@@ -56,7 +56,7 @@ class MLP(nn.Module):
         x = self.fc3(x)
         return x
 
-def train_model(seed, train_loader, test_loader, epochs=3, lr=0.001, save_dir="mc_mnist_models"):
+def train_model(seed, train_loader, test_loader, epochs=5, lr=0.001, save_dir="mc_mnist_models"):
     torch.manual_seed(seed)
     model = MLP(seed=seed)
     criterion = nn.CrossEntropyLoss()
