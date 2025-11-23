@@ -2,12 +2,12 @@
 #SBATCH --job-name=cifar_training
 #SBATCH --output=logs/training_%j.out
 #SBATCH --error=logs/training_%j.err
+#SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --gres=gpu:h200:1
+#SBATCH --gres=gpu:1
+#SBATCH --mem=64G
 #SBATCH --time=08:00:00
-#SBATCH --mem=32G
 
 # Create logs directory if it doesn't exist
 mkdir -p logs
