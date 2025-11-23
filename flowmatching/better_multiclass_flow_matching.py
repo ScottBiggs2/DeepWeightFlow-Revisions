@@ -401,14 +401,23 @@ class MultiClassWeightSpaceFlowModel(nn.Module):
             nn.Linear(time_embed_dim, time_embed_dim)
         ) 
 
+        # # Main MLP blocks with conditioning re-injection
+        # self.block_1 = ResidualBlock(input_dim + time_embed_dim + class_embed_dim, hidden_dim, dropout=dropout)
+        # self.block_2 = ResidualBlock(hidden_dim + time_embed_dim + class_embed_dim, hidden_dim, dropout=dropout)
+        # self.block_3 = ResidualBlock(hidden_dim + time_embed_dim + class_embed_dim, hidden_dim//2, dropout=dropout)
+        # self.block_4 = ResidualBlock(hidden_dim//2, hidden_dim, dropout=0)
+        # self.block_5 = ResidualBlock(hidden_dim, hidden_dim, dropout=0)
+        # self.output_layer = nn.Linear(hidden_dim, input_dim)
+        
+
         # Main MLP blocks with conditioning re-injection
         self.block_1 = ResidualBlock(input_dim + time_embed_dim + class_embed_dim, hidden_dim, dropout=dropout)
-        self.block_2 = ResidualBlock(hidden_dim + time_embed_dim + class_embed_dim, hidden_dim, dropout=dropout)
-        self.block_3 = ResidualBlock(hidden_dim + time_embed_dim + class_embed_dim, hidden_dim//2, dropout=dropout)
+        self.block_2 = ResidualBlock(hidden_dim, hidden_dim, dropout=dropout)
+        self.block_3 = ResidualBlock(hidden_dim, hidden_dim//2, dropout=dropout)
         self.block_4 = ResidualBlock(hidden_dim//2, hidden_dim, dropout=0)
         self.block_5 = ResidualBlock(hidden_dim, hidden_dim, dropout=0)
         self.output_layer = nn.Linear(hidden_dim, input_dim)
-        
+
         # Initialize output layer to near-zero for stability
         nn.init.zeros_(self.output_layer.weight)
         nn.init.zeros_(self.output_layer.bias)
@@ -420,11 +429,11 @@ class MultiClassWeightSpaceFlowModel(nn.Module):
         combined_input = torch.cat([x, t_embed, c_embed], dim=-1)
         h1 = self.block_1(combined_input)
 
-        h1_combined = torch.cat([h1, t_embed, c_embed], dim=-1)
-        h2 = self.block_2(h1_combined)
+        # h1 = torch.cat([h1, t_embed, c_embed], dim=-1)
+        h2 = self.block_2(h1)
 
-        h2_combined = torch.cat([h2, t_embed, c_embed], dim=-1)
-        h3 = self.block_3(h2_combined)
+        # h2 = torch.cat([h2, t_embed, c_embed], dim=-1)
+        h3 = self.block_3(h2)
 
         h4 = self.block_4(h3)
 
