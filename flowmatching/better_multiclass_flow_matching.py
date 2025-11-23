@@ -406,6 +406,7 @@ class MultiClassWeightSpaceFlowModel(nn.Module):
         self.block_2 = ResidualBlock(hidden_dim + time_embed_dim + class_embed_dim, hidden_dim, dropout=dropout)
         self.block_3 = ResidualBlock(hidden_dim + time_embed_dim + class_embed_dim, hidden_dim//2, dropout=dropout)
         self.block_4 = ResidualBlock(hidden_dim//2, hidden_dim, dropout=0)
+        self.block_5 = ResidualBlock(hidden_dim, hidden_dim, dropout=0)
         self.output_layer = nn.Linear(hidden_dim, input_dim)
         
         # Initialize output layer to near-zero for stability
@@ -426,6 +427,10 @@ class MultiClassWeightSpaceFlowModel(nn.Module):
         h3 = self.block_3(h2_combined)
 
         h4 = self.block_4(h3)
-        output = self.output_layer(h4)
+        h4_combined = torch.cat([h4, t_embed, c_embed], dim=-1)
+
+        h5 = self.block_5(h4_combined)
+
+        output = self.output_layer(h5)
 
         return output

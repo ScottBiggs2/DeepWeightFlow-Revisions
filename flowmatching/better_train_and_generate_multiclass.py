@@ -338,7 +338,7 @@ def train_and_generate(args):
     model_classes = [
         ('mc_mlp_mnist_compressed', 0),
         ('mc_mlp_fashion_mnist_compressed', 1),
-        ('resnet20_cifar10_compressed', 2),
+        # ('resnet20_cifar10_compressed', 2),
     ]
     
     print(f"Training multiclass flow matching for {len(model_classes)} classes")
