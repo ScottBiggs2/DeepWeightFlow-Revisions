@@ -206,37 +206,33 @@ def prepare_class_data(models, model_config, class_label):
         n_components = model_config['pca_components']
         n_samples = flat_target_weights.shape[0]
         
-        print(f"Applying PCA with {n_components} components")
-        
-        # CRITICAL: Set batch_size to ensure ALL batches have >= n_components samples
-        # The bug occurs when any batch has fewer samples than n_components
-        # Solution: Use batch_size that ensures last batch is still large enough
-        if n_samples <= n_components:
+        # Ensure we don't request more components than possible
+        max_possible_components = min(n_samples - 1, flat_dim)
+        if n_components > max_possible_components:
             raise ValueError(
-                f"Cannot apply PCA: n_samples ({n_samples}) must be > n_components ({n_components})"
+                f"Requested {n_components} PCA components but only {max_possible_components} possible "
+                f"(n_samples={n_samples}, n_features={flat_dim}). "
+                f"Either reduce pca_components in config or use more models (--num_models)."
             )
         
-        # Set batch_size to process all samples at once OR ensure minimum batch size
-        # This guarantees no batch will have < n_components samples
-        pca_batch_size = max(n_components + 1, n_samples)
+        print(f"Applying PCA with {n_components} components")
         
-        print(f"  Using batch_size={pca_batch_size} for IncrementalPCA")
-        
-        ipca = IncrementalPCA(n_components=n_components, batch_size=pca_batch_size)
+        # Use IncrementalPCA with small batch_size for memory efficiency
+        # The batch_size here is just for PCA computation, not flow matching
+        ipca = IncrementalPCA(n_components=n_components, batch_size=min(10, n_samples))
         flat_latent = ipca.fit_transform(flat_target_weights.cpu().numpy())
         
-        # VERIFY no silent reduction occurred
-        if ipca.n_components_ != n_components:
+        # Verify we got what we asked for
+        if flat_latent.shape[1] != n_components:
             raise ValueError(
-                f"IncrementalPCA bug: requested {n_components} components but got {ipca.n_components_}. "
-                f"n_samples={n_samples}, batch_size={pca_batch_size}. "
-                f"This should not happen with batch_size={pca_batch_size}."
+                f"PCA returned {flat_latent.shape[1]} components instead of requested {n_components}. "
+                f"This should not happen. n_samples={n_samples}, flat_dim={flat_dim}"
             )
         
         target_tensor = torch.tensor(flat_latent, dtype=torch.float32)
         actual_dim = n_components
         print(f"  Variance explained: {ipca.explained_variance_ratio_.sum():.4f}")
-        print(f"  Verified n_components: {ipca.n_components_}")
+        print(f"  Output shape: {flat_latent.shape}")
     else:
         target_tensor = flat_target_weights
         actual_dim = flat_dim
@@ -284,10 +280,16 @@ def train_and_generate(args):
     #     ('mc_mlp_fashion_mnist', 1),
     # ]
 
+    # model_classes = [
+    #     ('mc_mlp_mnist_compressed', 0),
+    #     ('mc_mlp_fashion_mnist_compressed', 1),
+    #     ('mc_mlp_iris_compressed', 2),
+    # ]
+
     model_classes = [
         ('mc_mlp_mnist_compressed', 0),
         ('mc_mlp_fashion_mnist_compressed', 1),
-        ('mc_mlp_iris_compressed', 2),
+        ('resnet20_cifar10_compressed', 2),
     ]
 
     # For 3-class PCA compression demo (uncomment to use):
