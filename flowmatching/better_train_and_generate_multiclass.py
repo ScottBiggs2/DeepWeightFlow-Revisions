@@ -178,21 +178,65 @@ def prepare_class_data(models, model_config, class_label):
     flat_dim = flat_target_weights.shape[1]
     print(f"Class {class_label} weight space dimension: {flat_dim:,}")
     
+    # # Apply PCA if configured
+    # # NOTE: Each class can have its own PCA transform, but all must project
+    # # to the same number of components (pca_components) for multiclass flow
+    # ipca = None
+    # if model_config.get('use_pca', False) and model_config.get('pca_components'):
+    #     print(f"Applying PCA with {model_config['pca_components']} components")
+    #     # ipca = IncrementalPCA(n_components=model_config['pca_components'], batch_size=10)
+
+    #     pca_batch_size = max(model_config['pca_components'] + 10, min(50, flat_target_weights.shape[0]))
+    #     ipca = IncrementalPCA(n_components=model_config['pca_components'], batch_size=pca_batch_size)
+
+    #     flat_latent = ipca.fit_transform(flat_target_weights.cpu().numpy())
+    #     target_tensor = torch.tensor(flat_latent, dtype=torch.float32)
+    #     actual_dim = model_config['pca_components']
+    #     print(f"  Variance explained: {ipca.explained_variance_ratio_.sum():.4f}")
+    # else:
+    #     target_tensor = flat_target_weights
+    #     actual_dim = flat_dim
+
+
     # Apply PCA if configured
     # NOTE: Each class can have its own PCA transform, but all must project
     # to the same number of components (pca_components) for multiclass flow
     ipca = None
     if model_config.get('use_pca', False) and model_config.get('pca_components'):
-        print(f"Applying PCA with {model_config['pca_components']} components")
-        # ipca = IncrementalPCA(n_components=model_config['pca_components'], batch_size=10)
-
-        pca_batch_size = max(model_config['pca_components'] + 10, min(50, flat_target_weights.shape[0]))
-        ipca = IncrementalPCA(n_components=model_config['pca_components'], batch_size=pca_batch_size)
+        n_components = model_config['pca_components']
+        n_samples = flat_target_weights.shape[0]
         
+        print(f"Applying PCA with {n_components} components")
+        
+        # CRITICAL: Set batch_size to ensure ALL batches have >= n_components samples
+        # The bug occurs when any batch has fewer samples than n_components
+        # Solution: Use batch_size that ensures last batch is still large enough
+        if n_samples <= n_components:
+            raise ValueError(
+                f"Cannot apply PCA: n_samples ({n_samples}) must be > n_components ({n_components})"
+            )
+        
+        # Set batch_size to process all samples at once OR ensure minimum batch size
+        # This guarantees no batch will have < n_components samples
+        pca_batch_size = max(n_components + 1, n_samples)
+        
+        print(f"  Using batch_size={pca_batch_size} for IncrementalPCA")
+        
+        ipca = IncrementalPCA(n_components=n_components, batch_size=pca_batch_size)
         flat_latent = ipca.fit_transform(flat_target_weights.cpu().numpy())
+        
+        # VERIFY no silent reduction occurred
+        if ipca.n_components_ != n_components:
+            raise ValueError(
+                f"IncrementalPCA bug: requested {n_components} components but got {ipca.n_components_}. "
+                f"n_samples={n_samples}, batch_size={pca_batch_size}. "
+                f"This should not happen with batch_size={pca_batch_size}."
+            )
+        
         target_tensor = torch.tensor(flat_latent, dtype=torch.float32)
-        actual_dim = model_config['pca_components']
+        actual_dim = n_components
         print(f"  Variance explained: {ipca.explained_variance_ratio_.sum():.4f}")
+        print(f"  Verified n_components: {ipca.n_components_}")
     else:
         target_tensor = flat_target_weights
         actual_dim = flat_dim
