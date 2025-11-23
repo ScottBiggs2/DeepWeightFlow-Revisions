@@ -427,9 +427,8 @@ class MultiClassWeightSpaceFlowModel(nn.Module):
         h3 = self.block_3(h2_combined)
 
         h4 = self.block_4(h3)
-        h4_combined = torch.cat([h4, t_embed, c_embed], dim=-1)
 
-        h5 = self.block_5(h4_combined)
+        h5 = self.block_5(h4)
 
         output = self.output_layer(h5)
 
