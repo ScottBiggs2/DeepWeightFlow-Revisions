@@ -200,7 +200,7 @@ class MultiClassFlowMatching:
         self.training = False  # NEW: Reset training flag
 
     def map(self, x0, class_label, n_steps=50, return_traj=False, method="euler", 
-            guidance_scale=1.0):  # NEW: CFG guidance scale
+            guidance_scale=3.0):  # NEW: CFG guidance scale
         """
         Map from source to target for a specific class.
         
@@ -401,6 +401,14 @@ class MultiClassWeightSpaceFlowModel(nn.Module):
             nn.Linear(time_embed_dim, time_embed_dim)
         ) 
 
+        self.input_project = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout * 0.5),  # Light dropout
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+
         # # Main MLP blocks with conditioning re-injection
         # self.block_1 = ResidualBlock(input_dim + time_embed_dim + class_embed_dim, hidden_dim, dropout=dropout)
         # self.block_2 = ResidualBlock(hidden_dim + time_embed_dim + class_embed_dim, hidden_dim, dropout=dropout)
@@ -408,10 +416,9 @@ class MultiClassWeightSpaceFlowModel(nn.Module):
         # self.block_4 = ResidualBlock(hidden_dim//2, hidden_dim, dropout=0)
         # self.block_5 = ResidualBlock(hidden_dim, hidden_dim, dropout=0)
         # self.output_layer = nn.Linear(hidden_dim, input_dim)
-        
 
         # Main MLP blocks with conditioning re-injection
-        self.block_1 = ResidualBlock(input_dim + time_embed_dim + class_embed_dim, hidden_dim, dropout=dropout)
+        self.block_1 = ResidualBlock(hidden_dim + time_embed_dim + class_embed_dim, hidden_dim, dropout=dropout)
         self.block_2 = ResidualBlock(hidden_dim, hidden_dim, dropout=dropout)
         self.block_3 = ResidualBlock(hidden_dim, hidden_dim//2, dropout=dropout)
         self.block_4 = ResidualBlock(hidden_dim//2, hidden_dim, dropout=0)
@@ -425,8 +432,9 @@ class MultiClassWeightSpaceFlowModel(nn.Module):
     def forward(self, x, t, c): 
         t_embed = self.time_embed(t)
         c_embed = self.class_embed(c)
+        x_embed = self.input_project(x)
 
-        combined_input = torch.cat([x, t_embed, c_embed], dim=-1)
+        combined_input = torch.cat([x_embed, t_embed, c_embed], dim=-1)
         h1 = self.block_1(combined_input)
 
         # h1 = torch.cat([h1, t_embed, c_embed], dim=-1)
