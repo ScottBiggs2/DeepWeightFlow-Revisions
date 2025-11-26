@@ -745,6 +745,111 @@ def plot_source_distribution_comparison(original_models, cfm, flat_dim, layer_la
     
     return source_df
 
+
+def plot_source_distribution_comparison_resnet(original_models, cfm, flat_dim, weight_shapes, bias_shapes, test_loader, model_type, device='cuda', n_samples=100):
+    """
+    Source distribution comparison for ResNet weight-space generation.
+    Generates models from several source stds, reconstructs ResNets, computes
+    accuracies and max-IoU similarities vs original models, saves CSV and plots.
+    """
+    from flowmatching.models import get_resnet18
+
+    source_stds = [0.001, 0.005, 0.01]
+    all_generated_data = []
+
+    logging.info("Adding original models for comparison context (ResNet)")
+    orig_accuracies = [test_mlp(model, test_loader) for model in original_models]
+    orig_similarities = compute_max_similarity_vs_originals(original_models, original_models, test_loader, device)
+
+    for i, (acc, sim) in enumerate(zip(orig_accuracies, orig_similarities)):
+        all_generated_data.append({
+            'source_std': 'original',
+            'model_id': i,
+            'accuracy': acc,
+            'max_iou_similarity': sim,
+            'model_type': 'Original'
+        })
+
+    for source_std in source_stds:
+        logging.info(f"Generating ResNet models with source std: {source_std}")
+
+        random_flat = torch.randn(n_samples, flat_dim, device=device) * source_std
+        generated_flat = cfm.map(random_flat, n_steps=100, method="rk4")
+
+        generated_models = []
+        for i in range(n_samples):
+            flat_vec = generated_flat[i]
+            new_wso = WeightSpaceObjectResnet.from_flat(flat_vec, weight_shapes, bias_shapes, device=device)
+
+            model = get_resnet18(num_classes=10)
+            param_dict = {}
+            w_idx = 0
+            b_idx = 0
+            for name, param in model.named_parameters():
+                if 'weight' in name:
+                    param_dict[name] = new_wso.weights[w_idx]
+                    w_idx += 1
+                elif 'bias' in name:
+                    param_dict[name] = new_wso.biases[b_idx]
+                    b_idx += 1
+
+            with torch.no_grad():
+                for name, param in model.named_parameters():
+                    if name in param_dict:
+                        param.copy_(param_dict[name])
+
+            try:
+                model = recalibrate_bn_stats(model, device=device)
+            except Exception:
+                pass
+
+            generated_models.append(model.to(device))
+
+        # Compute accuracies and similarities
+        accuracies = [test_mlp(model, test_loader) for model in generated_models]
+        similarities = compute_max_similarity_vs_originals(generated_models, original_models, test_loader, device)
+
+        for i, (acc, sim) in enumerate(zip(accuracies, similarities)):
+            all_generated_data.append({
+                'source_std': source_std,
+                'model_id': i,
+                'accuracy': acc,
+                'max_iou_similarity': sim,
+                'model_type': f'Generated (σ={source_std})'
+            })
+
+        logging.info(f"Source std {source_std} - Mean accuracy: {np.mean(accuracies):.2f}% ± {np.std(accuracies):.2f}%")
+        logging.info(f"Source std {source_std} - Mean IoU vs orig: {np.mean(similarities):.4f} ± {np.std(similarities):.4f}")
+
+    # Save to CSV
+    import pandas as pd
+    source_df = pd.DataFrame(all_generated_data)
+    fname = f'source_distribution_comparison_{model_type}.csv'
+    source_df.to_csv(fname, index=False)
+    logging.info(f"Saved source distribution data to {fname}")
+
+    # Plot
+    plt.figure(figsize=(12, 8))
+    plt.rcParams.update({'font.size': 16})
+
+    orig_subset = source_df[source_df['source_std'] == 'original']
+    plt.scatter(orig_subset['max_iou_similarity'], orig_subset['accuracy'], alpha=0.6, label='Original', color='blue', s=50)
+
+    colors = ['red', 'orange', 'green']
+    for i, source_std in enumerate(source_stds):
+        subset = source_df[source_df['source_std'] == source_std]
+        plt.scatter(subset['max_iou_similarity'], subset['accuracy'], alpha=0.6, label=f'Generated (σ={source_std})', color=colors[i], s=50)
+
+    plt.xlabel('Maximum IoU Similarity vs Original Models')
+    plt.ylabel('Test Accuracy (%)')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(f'source_distribution_comparison_{model_type}.png', dpi=150, bbox_inches='tight')
+    plt.show()
+
+    return source_df
+
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -892,8 +997,59 @@ def main():
         mean_acc, std_acc = fm_print_stats(generated_models, test_loader, device)
         logging.info(f"Generated models mean accuracy: {mean_acc:.2f}% ± {std_acc:.2f}%")
 
+        # Produce and save max-IoU vs accuracy CSV/plots (matching original script outputs)
+        try:
+            logging.info("Saving Max-IoU vs Accuracy CSV and plots...")
+            plot_results = plot_similarity_vs_accuracy(models_to_use, generated_models, test_loader, model_type=f"{model_key}_{training_mode}", device=device)
+            violin_results = plot_similarity_vs_accuracy_violin(models_to_use, generated_models, test_loader, model_type=f"{model_key}_{training_mode}", device=device)
+            logging.info(f"Saved similarity/violin CSVs for {model_key}_{training_mode}")
+        except Exception as e:
+            logging.info(f"Failed to save Max-IoU CSVs/plots: {e}")
+
+        # Also produce source-distribution comparison plots/CSVs for ResNet
+        try:
+            logging.info("Saving source-distribution comparison (ResNet)...")
+            source_comp = plot_source_distribution_comparison_resnet(models_to_use, cfm, flat_dim, weight_shapes, bias_shapes, test_loader, model_type=f"{model_key}_{training_mode}", device=device, n_samples=n_samples)
+            logging.info(f"Saved source-distribution CSVs for {model_key}_{training_mode}")
+        except Exception as e:
+            logging.info(f"Failed to save source-distribution CSVs/plots: {e}")
+
         # Nearest neighbor analysis (in weight-space)
         nn_distances = nearest_neighbor_analysis(models_to_use, generated_models, device=device)
+
+        # Save distance metrics and histograms to CSV for later analysis
+        try:
+            import pandas as pd
+
+            distances_df = pd.DataFrame({
+                'nn_orig_to_orig': nn_distances['nn_orig_to_orig'],
+                'nn_gen_to_gen': nn_distances['nn_gen_to_gen'],
+                'nn_orig_to_gen': nn_distances['nn_orig_to_gen'],
+                'nn_gen_to_orig': nn_distances['nn_gen_to_orig'],
+            })
+            distances_fname = f"nn_distances_{model_key}_{training_mode}.csv"
+            distances_df.to_csv(distances_fname, index=False)
+            logging.info(f"Saved nearest-neighbor distances to {distances_fname}")
+
+            # Histogram data: convert bin edges to centers
+            bins = nn_distances.get('bins')
+            if bins is not None:
+                centers = (bins[:-1] + bins[1:]) / 2
+            else:
+                centers = np.arange(len(nn_distances['hist_orig_orig']))
+
+            hist_df = pd.DataFrame({
+                'bin_center': centers,
+                'hist_orig_orig': nn_distances['hist_orig_orig'],
+                'hist_gen_gen': nn_distances['hist_gen_gen'],
+                'hist_orig_gen': nn_distances['hist_orig_gen'],
+                'hist_gen_orig': nn_distances['hist_gen_orig'],
+            })
+            hist_fname = f"distance_hist_{model_key}_{training_mode}.csv"
+            hist_df.to_csv(hist_fname, index=False)
+            logging.info(f"Saved histogram data to {hist_fname}")
+        except Exception as e:
+            logging.info(f"Failed to save distance CSVs: {e}")
 
         # Optional: save or plot results
         logging.info("Finished generation and analysis for training mode: %s", training_mode)
