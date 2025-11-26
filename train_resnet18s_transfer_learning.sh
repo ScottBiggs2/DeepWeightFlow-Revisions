@@ -24,6 +24,14 @@ echo "Job ID: $SLURM_JOB_ID"
 echo "GPU: $CUDA_VISIBLE_DEVICES"
 echo "=========================================="
 
+# Verify the script exists
+if [ ! -f "flowmatching/baseline_transfer_learning_resnet18.py" ]; then
+    echo "ERROR: flowmatching/baseline_transfer_learning_resnet18.py not found in $(pwd)"
+    echo "Contents of current directory:"
+    ls -la
+    exit 1
+fi
+
 # Load required modules (adjust based on your cluster)
 # module load python/3.9
 # module load cuda/12.0
@@ -52,7 +60,7 @@ echo ""
 echo "=========================================="
 echo "Starting Transfer Learning Evaluation"
 echo "=========================================="
-python evaluate_pretrained_transfer.py \
+python flowmatching/baseline_transfer_learning_resnet18.py \
     --model_dir resnet18_transfer_learning \
     --num_models 5 \
     --output pretrained_transfer_results.csv
