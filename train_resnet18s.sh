@@ -5,7 +5,7 @@
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:h200:1
 #SBATCH --mem=64G
 #SBATCH --time=08:00:00
 
@@ -58,4 +58,5 @@ fi
 
 echo "================================"
 echo "ResNet18 training completed!"
+echo "Job finished at: $(date)"
 echo "================================"
