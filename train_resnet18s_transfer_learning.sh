@@ -9,6 +9,9 @@
 #SBATCH --mem=16G
 #SBATCH --time=02:00:00
 
+# Change to the directory where the job was submitted from
+cd $SLURM_SUBMIT_DIR
+
 # Create logs directory if it doesn't exist
 mkdir -p logs
 
@@ -16,6 +19,7 @@ mkdir -p logs
 echo "=========================================="
 echo "Job started at: $(date)"
 echo "Running on node: $(hostname)"
+echo "Working directory: $(pwd)"
 echo "Job ID: $SLURM_JOB_ID"
 echo "GPU: $CUDA_VISIBLE_DEVICES"
 echo "=========================================="
