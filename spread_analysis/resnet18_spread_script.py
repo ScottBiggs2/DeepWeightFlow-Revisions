@@ -108,12 +108,24 @@ def compute_max_similarity_vs_originals(models, original_models, test_loader, de
     original_masks = all_masks[len(models):]
     
     max_similarities = []
-    
+
+    # Detect if 'models' and 'original_models' are the same sequence (identity or elementwise)
+    same_lists = False
+    try:
+        if len(models) == len(original_models) and all(models[k] is original_models[k] for k in range(len(models))):
+            same_lists = True
+    except Exception:
+        same_lists = False
+
     for i in tqdm(range(len(models)), desc="Computing max similarities vs originals"):
         similarities = []
         for j in range(len(original_models)):
+            # When comparing originals vs originals, skip self-comparison to avoid trivial IoU==1.0
+            if same_lists and i == j:
+                continue
             iou = compute_wrong_iou_vectorized(model_masks[i], original_masks[j])
             similarities.append(iou)
+
         max_similarities.append(max(similarities) if similarities else 0.0)
     
     return np.array(max_similarities)
